@@ -1,0 +1,7 @@
+__pycache__/
+dist/
+setup.pyc
+amp_ost.egg-info/
+build/
+*.pyc
+**/*.pyc
