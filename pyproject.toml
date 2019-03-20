@@ -1,13 +1,17 @@
 [build-system]
-requires = [ "setuptools >= 35.0.2", "wheel >= 0.29.0"]
+requires = [ "setuptools >= 35.0.2", "wheel >= 0.29.0", "cython>=0.29.6"]
 build-backend = "setuptools.build_meta"
 
 [tool.tox]
 legacy_tox_ini = """
 [tox]
-envlist = py35,py36, py37
+envlist = py36,py37
 
 [testenv]
+deps = setuptools
+       wheel
+       cython
+
 commands = python setup.py build_ext
            python setup.py bdist_wheel
 """
