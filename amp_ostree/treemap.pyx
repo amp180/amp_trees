@@ -6,6 +6,7 @@ from cpython.ref cimport PyObject, Py_INCREF, Py_DECREF
 from cpython.weakref cimport PyWeakref_CheckRef, PyWeakref_NewRef, PyWeakref_GetObject
 cimport cython
 
+
 @cython.final
 @cython.no_gc_clear
 cdef class _MemStack():
@@ -55,7 +56,8 @@ cdef class _MemStack():
         """
         if self.num_items < self.size:
             Py_INCREF(obj)
-            self.arr[self.num_items] = <PyObject *> obj
+            self.arr[self.num_items] = <PyObject *> obj        self._insert(key, value)
+
             self.num_items += 1
         else:
             raise IndexError("The stack is full.")
@@ -111,6 +113,10 @@ cdef class _MemStack():
         return self.num_items
 
 
+cdef inline bool size_t_max(size_t a, size_t b) nogil:
+    return a if a > b else b
+
+
 #@cython.trashcan(True)
 @cython.no_gc_clear
 @cython.final
@@ -156,23 +162,6 @@ cdef class OrderedTreeDict():
         return node.value
 
     @cython.nonecheck(False)
-    cdef inline _get_node_with_stack(OrderedTreeDict self, object key):
-        cdef _Node node = self.root
-        cdef _MemStack stack
-        if node is not None:
-            stack = _MemStack(node.height)
-        while node is not None:
-            if key < node.key:
-                stack.push(node)
-                node = node.left
-            elif key > node.key:
-                stack.push(node)
-                node = node.right
-            else:
-                break
-        return node, stack
-
-    @cython.nonecheck(False)
     def get(OrderedTreeDict self, object key, default=None):
         try:
             return self._get(key)
@@ -191,44 +180,67 @@ cdef class OrderedTreeDict():
 
     @cython.nonecheck(False)
     cdef inline _insert(OrderedTreeDict self, object key, object value, replace=True):
-        cdef _Node insertion_node, new_node
+        cdef _Node insertion_node, next_node, new_node, parent_node
         cdef _MemStack stack
         # Find insertion point
-        insertion_node, stack = self._get_node_with_stack(key)
+        next_node = self.root
+        while next_node is not None:
+            insertion_node = next_node
+            if key < insertion_node.key:
+                next_node = insertion_node.left
+            elif key > insertion_node.key:
+                next_node = insertion_node.right
+            else: # key == insertion_node.key
+                break
         # Handle existing node if present.
-        if insertion_node is not None:
+        if next_node is not None:
             if replace:
                 # Replace value of existing node
-                insertion_node.value = value
+                next_node.value = value
                 return
             else:
                 # No-op
                 return
 
-        # Insert new node
-        insertion_node = stack.pop()
+        # Create new node
         new_node = _Node()
         new_node.key = key
         new_node.value = value
         new_node.depth = 0
         new_node.left_tree_size = 0
         new_node.right_tree_size = 0
-        new_node.parent_ref = PyWeakRef_GetRef(insertion_node)
         
-        if value < insertion_node.value:
-            # insert left
-            insertion_node.left = new_node
-            insertion_node.left_tree_size += 1
+        # Insert at the correct place in the tree
+        if insertion_node is None:
+            # No other nodes in tree
+            self.root = new_node
+            new_node.parent_ref = None
+            return
         else:
-            # insert right
-            insertion_node.right = new_node
-            insertion_node.right_tree_size += 1
-            
-        pass
+            new_node.parent_ref = PyWeakref_NewRef(insertion_node, None)
+            if value < insertion_node.value:
+                # insert left
+                insertion_node.left = new_node
+                insertion_node.left_tree_size += 1
+            else:
+                # insert right
+                insertion_node.right = new_node
+                insertion_node.right_tree_size += 1
+        
+        cdef parent_node = insertion_node
+        # Propagate information through the tree
+        if parent_node.left is not None ^ parent_node.right is not None:
+            # New node doesn't have a sibling, depth has changed.
+            parent_node.depth += 1
+            while parent_node:
+                parent_node = PyWeakref_GetObject(parent_node.parent_ref) if PyWeakref_CheckRef(parent_node.parent_ref) else None
+                
+                cdef next_left_depth = size_t_max(parent_node.)
+
 
     @cython.nonecheck(False)
     cpdef put(OrderedTreeDict self, object key, object value):
-        pass
+        self._insert(key, value)
 
     @cython.nonecheck(False)
     cdef inline _delete(OrderedTreeDict self, object key):
@@ -272,7 +284,7 @@ cdef class OrderedTreeDict():
             raise KeyError()
         cdef _Node node = self.root
         self._delete(self.root.key)
-        return (node.key, node.value)
+        return node.key, node.value
 
     def items(OrderedTreeDict self):
         """ Returns an iterator over (key, value) pairs."""
@@ -287,7 +299,7 @@ cdef class OrderedTreeDict():
         while node is not None:
             stack.push(node)
             node = node.left
-        while(stack.num_items>0):
+        while stack.num_items > 0:
             node = stack.pop()
             yield (node.key, node.value)
             node = node.right
@@ -390,7 +402,7 @@ cdef class OrderedTreeDict():
        while node is not None:
            stack.push(node)
            node = node.right
-       while(stack.num_items>0):
+       while stack.num_items > 0:
            node = stack.pop()
            yield (node.key, node.value)
            node = node.left
