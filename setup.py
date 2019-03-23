@@ -6,11 +6,13 @@ builtins.SETUP = True
 from amp_ostree import __version__
 
 
-# Check if cython is intalled.
+# Check if cython is installed.
 try:
     from Cython.Build import cythonize
     from Cython.Distutils.extension import Extension
     from Cython.Distutils import build_ext
+    from Cython.Compiler import Options
+    Options.annotate = True
 except ImportError:
     from setuptools import Extension
     USING_CYTHON = False
@@ -27,7 +29,7 @@ modules = [treeset, treemap]
 
 # generate .c files
 if USING_CYTHON:
-    modules = cythonize(modules)
+    modules = cythonize(modules, gdb_debug=True)
 
 setup(
     name="amp_ostree",
