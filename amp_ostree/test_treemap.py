@@ -1,7 +1,8 @@
 from unittest import TestCase, main
 from amp_ostree.treemap import OrderedTreeDict
-from random import randint, shuffle
+from random import randint
 import timeit
+
 
 class OrderedTreeDictTest(TestCase):
     
@@ -87,7 +88,7 @@ class OrderedTreeDictTest(TestCase):
         
     @staticmethod
     def test_fuzz_insertions():
-        """A test that inserts random keys into the tree and checks that they were inserted."""
+        """A test that inserts random keys into the tree and checks that they were all inserted."""
         key_range = 2**64
         value_range = 1024
         key_set = set()

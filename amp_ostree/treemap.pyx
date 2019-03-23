@@ -699,6 +699,7 @@ cdef class OrderedTreeDict():
         cdef _Node min_node = OrderedTreeDict._minimum(self.root)
         return min_node.key, min_node.value
     
+    @cython.nonecheck(False)
     def select(OrderedTreeDict self, size_t i):
         cdef _Node node = self.root
         if node is None:
@@ -715,11 +716,12 @@ cdef class OrderedTreeDict():
             raise IndexError()
         return node.key, node.value
     
+    @cython.nonecheck(False)
     def rank(OrderedTreeDict self, object key):
         cdef _Node node = self._get_node(key)
         cdef size_t rank = node.left_tree_size + 1
         cdef _Node parent_node = OrderedTreeDict._get_parent(node)
-        while (parent_node is not None):
+        while parent_node is not None:
             if node is parent_node.right:
                 rank = rank + parent_node.left_tree_size + 1
             node = parent_node
