@@ -22,10 +22,12 @@ else:
 
 # Build from .pyx files if cython is installed, otherwise assume installing from sdist and c files exist.
 ext = '.pyx' if USING_CYTHON else '.c'
-treeset = Extension("amp_ostree.treeset", ["amp_ostree/treeset"+ext])
-treemap = Extension("amp_ostree.treemap", ["amp_ostree/treemap"+ext])
+decl_ext = '.pxd' if USING_CYTHON else '.c'
+treeset = Extension("amp_ostree.treeset", ["amp_ostree/treeset"+ext, "amp_ostree/memstack"+decl_ext])
+treemap = Extension("amp_ostree.treemap", ["amp_ostree/treemap"+ext, "amp_ostree/memstack"+decl_ext])
+memstack = Extension("amp_ostree.memstack", ["amp_ostree/memstack"+ext, "amp_ostree/memstack"+decl_ext])
 
-modules = [treeset, treemap]
+modules = [treeset, treemap, memstack]
 
 # generate .c files
 if USING_CYTHON:

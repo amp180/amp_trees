@@ -70,7 +70,7 @@ class OrderedTreeDictTest(TestCase):
 
     @staticmethod
     def test_rank():
-        """A test to check that select finds the nth item in sorted order."""
+        """A test to check that rank finds index of a key in sorted order."""
         keys = list(range(100))
         d = OrderedTreeDict((key, None) for key in keys)
         assert all(list(
@@ -79,7 +79,7 @@ class OrderedTreeDictTest(TestCase):
 
     @staticmethod
     def test_rank_negative():
-        """A test to check that select finds the nth item in sorted order."""
+        """A test to check that rank finds index of a key in sorted order."""
         keys = list(range(-100, 100))
         d = OrderedTreeDict((key, None) for key in keys)
         assert all(list(

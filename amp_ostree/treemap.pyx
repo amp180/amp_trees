@@ -1,124 +1,11 @@
 #!python
 #cython: language_level=3
-
-from cpython.mem cimport PyMem_Malloc, PyMem_Realloc, PyMem_Free
-from cpython.ref cimport PyObject, Py_INCREF, Py_DECREF
 from cpython.weakref cimport PyWeakref_CheckRef, PyWeakref_NewRef, PyWeakref_GetObject
 cimport cython
-
-
-@cython.internal
-@cython.final
-@cython.no_gc_clear
-cdef class _MemStack():
-    """ A preallocated stack of object references."""
-    cdef:
-        size_t size
-        size_t num_items
-        PyObject** arr
-
-    @cython.nonecheck(False)
-    @cython.boundscheck(False)
-    @cython.wraparound(False)
-    def __cinit__(_MemStack self, size_t size):
-        """ Initialiser
-        Args:
-            size (long): The fixed maximum size of the stack.
-        Raises:
-            MemoryError: Size too large.
-        Returns:
-            None
-        """
-        self.size = size
-        self.num_items = 0
-        self.arr = <PyObject **> PyMem_Malloc(size * sizeof(PyObject *))
-        if self.arr == NULL:
-            raise MemoryError("Cannot allocate stack of size %i pointers." % size)
-
-    @cython.nonecheck(False)
-    @cython.boundscheck(False)
-    @cython.wraparound(False)
-    def __dealloc__(_MemStack self):
-        # Safely de-allocate the memory and decrement reference counts.
-        cdef PyObject *p
-        for p in self.arr[0:self.num_items]:
-            Py_DECREF(<object> p)
-        PyMem_Free(self.arr)
-        self.num_items = 0
-        self.size = 0
-        self.arr = NULL
-
-    @cython.nonecheck(False)
-    @cython.boundscheck(False)
-    @cython.wraparound(False)
-    cpdef inline push(_MemStack self, object obj):
-        """ Push an item onto the stack.
-        Args:
-            obj (object): The object to push onto the stack.
-        Raises:
-            IndexError: Failed to push because the stack is full.
-        """
-        if self.num_items < self.size:
-            Py_INCREF(obj)
-            self.arr[self.num_items] = <PyObject *> obj
-            self.num_items += 1
-        else:
-            raise IndexError("The stack is full.")
-
-    @cython.nonecheck(False)
-    @cython.boundscheck(False)
-    @cython.wraparound(False)
-    cpdef inline object pop(_MemStack self):
-        """ Pop an item off the stack.
-        Raises:
-            IndexError: No item can be popped because the stack is empty.
-        """
-        if self.num_items > 0:
-            obj = <object> self.arr[self.num_items-1]
-            Py_DECREF(obj)
-            self.num_items -= 1
-            return obj
-        else:
-            raise IndexError("The stack is empty.")
-
-    @cython.nonecheck(False)
-    @cython.boundscheck(False)
-    @cython.wraparound(False)
-    cpdef inline peek(_MemStack self):
-        """ Get the item from the top of the stack without removing it.
-        Raises:
-            IndexError: The stack is empty.
-        """
-        if self.num_items > 0:
-            return <object> self.arr[self.num_items-1]
-        else:
-            raise IndexError("The stack is empty.")
-
-    @cython.nonecheck(False)
-    @cython.boundscheck(False)
-    @cython.wraparound(False)
-    cpdef _MemStack copy(_MemStack self):
-        cdef _MemStack tmp = _MemStack(self.size)
-        tmp.num_items = self.num_items
-        # copy pointers and incref
-        cdef size_t i
-        cdef PyObject *p
-        for i in range(0, self.num_items):
-            p = self.arr[i]
-            Py_INCREF(<object> p)
-            tmp.arr[i] = p
-        return tmp
-
-    def __bool__(_MemStack self):
-        return self.num_items > 0
-
-    def __len__(_MemStack self):
-        return self.num_items
-
+from amp_ostree.memstack cimport MemStack
 
 cdef inline size_t size_t_max(size_t a, size_t b) nogil:
     return a if a > b else b
-
 
 #@cython.trashcan(True)
 @cython.no_gc_clear
@@ -262,7 +149,6 @@ cdef class OrderedTreeDict():
     @cython.nonecheck(False)
     cdef inline _insert(OrderedTreeDict self, object key, object value, bint replace=True):
         cdef _Node insertion_node, next_node, new_node, parent_node, prev_parent_node
-        cdef _MemStack stack
         cdef size_t new_left_depth, new_right_depth, max_depth
         # Find insertion point
         insertion_node = None
@@ -621,22 +507,22 @@ cdef class OrderedTreeDict():
     def items(OrderedTreeDict self):
         """ Returns an iterator over (key, value) pairs."""
         cdef _Node node = self.root
-        cdef _MemStack stack
+        cdef MemStack stack
         if node is None:
             return
         try:
-            stack = _MemStack(node.left_tree_size+node.right_tree_size+1)
+            stack = MemStack(node.left_tree_size+node.right_tree_size+1)
         except MemoryError:
             raise MemoryError("Not enough memory to iterate a tree this deep.")
         while node is not None:
-            stack.push(node)
+            stack.c_push(node)
             node = node.left
         while stack.num_items > 0:
-            node = stack.pop()
+            node = stack.c_pop()
             yield (node.key, node.value)
             node = node.right
             while node is not None:
-                stack.push(node)
+                stack.c_push(node)
                 node = node.left
 
     @cython.nonecheck(False)
@@ -753,22 +639,22 @@ cdef class OrderedTreeDict():
     @cython.nonecheck(False)
     def __reversed__(OrderedTreeDict self):
        cdef _Node node = self.root
-       cdef _MemStack stack
+       cdef MemStack stack
        if node is None:
            return
        try:
-           stack = _MemStack(node.depth)
+           stack = MemStack(node.depth)
        except MemoryError:
            raise MemoryError("Not enough memory to iterate a tree this deep.")
        while node is not None:
-           stack.push(node)
+           stack.c_push(node)
            node = node.right
        while stack.num_items > 0:
-           node = stack.pop()
+           node = stack.c_pop()
            yield (node.key, node.value)
            node = node.left
            while node is not None:
-               stack.push(node)
+               stack.c_push(node)
                node = node.right
  
     @cython.nonecheck(False)
