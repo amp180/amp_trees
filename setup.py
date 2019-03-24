@@ -17,15 +17,17 @@ except ImportError:
     from setuptools import Extension
     USING_CYTHON = False
 else:
-    USING_CYTHON = True
+    if glob.glob("amp_ostree/*.pyx"):
+        USING_CYTHON = True
+    else:
+        USING_CYTHON = False
 
 
 # Build from .pyx files if cython is installed, otherwise assume installing from sdist and c files exist.
 ext = '.pyx' if USING_CYTHON else '.c'
-decl_ext = '.pxd' if USING_CYTHON else '.c'
-treeset = Extension("amp_ostree.treeset", ["amp_ostree/treeset"+ext, "amp_ostree/memstack"+decl_ext])
-treemap = Extension("amp_ostree.treemap", ["amp_ostree/treemap"+ext, "amp_ostree/memstack"+decl_ext])
-memstack = Extension("amp_ostree.memstack", ["amp_ostree/memstack"+ext, "amp_ostree/memstack"+decl_ext])
+treeset = Extension("amp_ostree.treeset", ["amp_ostree/treeset"+ext])
+treemap = Extension("amp_ostree.treemap", ["amp_ostree/treemap"+ext])
+memstack = Extension("amp_ostree.memstack", ["amp_ostree/memstack"+ext])
 
 modules = [treeset, treemap, memstack]
 
@@ -38,8 +40,8 @@ setup(
     license="MIT",
     ext_modules=modules,
     packages=find_packages(),
-    package_data={'amp_ostree': glob.glob("amp_ostree/*.((pyx)|(c))"),}, # Include pyx and c files in sdist
-    include_package_data=False, # Don't install the pyx files with the bdist.
+    package_data={'amp_ostree': glob.glob("amp_ostree/*.((pyx)|(.pxd)|(c))"),}, # Include pyx and c files in sdist
+    include_package_date=True, # Don't install the pyx files with the bdist.
     version=__version__,
     cmdclass = {'build_ext': build_ext} if USING_CYTHON else {}
 
