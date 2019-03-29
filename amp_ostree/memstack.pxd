@@ -4,8 +4,8 @@ cimport cython
 cdef class MemStack:
     cdef size_t size
     cdef size_t num_items
+    cdef size_t max_depth
     cdef PyObject** arr
-
 
     @cython.nonecheck(False)
     @cython.boundscheck(False)
@@ -21,6 +21,8 @@ cdef class MemStack:
             Py_INCREF(obj)
             self.arr[self.num_items] = <PyObject *> obj
             self.num_items += 1
+            if self.num_items > self.max_depth:
+                self.max_depth = self.num_items
         else:
             raise IndexError("The stack is full.")
 

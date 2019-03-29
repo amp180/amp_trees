@@ -2,7 +2,7 @@ from unittest import TestCase, main
 from amp_ostree.treemap import OrderedTreeDict
 from random import randint
 import timeit
-
+import math
 
 class OrderedTreeDictTest(TestCase):
     
@@ -13,7 +13,7 @@ class OrderedTreeDictTest(TestCase):
         d.put(-1, -1)
         d.put(1, 1)
         assert len(d) == 3, "Length should reflect number of items inserted,"
-        assert d.root.depth == 1, "Not balanced."
+        assert d.depth() <= 2, "Not balanced."
     
     @staticmethod
     def test_insertion_right_right():
@@ -22,16 +22,16 @@ class OrderedTreeDictTest(TestCase):
         d.put(1, 1)
         d.put(2, 2)
         assert len(d) == 3, "Length should reflect number of items inserted,"
-        assert d.root.depth == 1, "Not balanced."
+        assert d.depth() == 2, "Not balanced."
         
     @staticmethod
     def test_insertion_right_left():
         d = OrderedTreeDict()
-        d.put(0,0)
+        d.put(0, 0)
         d.put(2, 2)
         d.put(1, 1)
         assert len(d) == 3, "Length should reflect number of items inserted,"
-        assert d.root.depth == 1, "Not balanced."
+        assert d.depth() == 2, "Not balanced."
 
     @staticmethod
     def test_insertion_left_right():
@@ -40,7 +40,7 @@ class OrderedTreeDictTest(TestCase):
         d.put(-2, -2)
         d.put(-1, -1)
         assert len(d) == 3, "Length should reflect number of items inserted,"
-        assert d.root.depth == 1, "Not balanced."
+        assert d.depth() == 2, "Not balanced."
 
     @staticmethod
     def test_insertion_left_left():
@@ -49,7 +49,7 @@ class OrderedTreeDictTest(TestCase):
         d.put(-1, -1)
         d.put(-2, -2)
         assert len(d) == 3, "Length should reflect number of items inserted,"
-        assert d.root.depth == 1, "Not balanced."
+        assert d.depth() == 2, "Not balanced."
         
     @staticmethod
     def test_sorted():
@@ -67,6 +67,26 @@ class OrderedTreeDictTest(TestCase):
         keys = list(range(100))
         d = OrderedTreeDict((key, None) for key in keys)
         assert all(d.select(k)[0] == k for k in keys)
+
+    @staticmethod
+    def test_select_simple():
+        d = OrderedTreeDict([(0, 0), (1, 1), (2, 2)])
+        assert d.root.left is not None
+        assert d.root.right is not None
+        assert len(d) == 3
+        assert (d.select(0) == (0, 0))
+        assert(d.select(1) == (1, 1))
+        assert (d.select(2) == (2, 2))
+
+    @staticmethod
+    def test_rank_simple():
+        d = OrderedTreeDict([(0, 0), (1, 1), (2, 2)])
+        assert d.root.left is not None
+        assert d.root.right is not None
+        assert len(d) == 3
+        assert (d.rank(0) == 0)
+        assert (d.rank(1) == 1)
+        assert (d.rank(2) == 2)
 
     @staticmethod
     def test_rank():
@@ -102,6 +122,8 @@ class OrderedTreeDictTest(TestCase):
         keys = list(d.keys())
         assert len(keys) == len(key_set), "Length should reflect number of items inserted."
         assert len(keys) == len(list(keys)), "Iteration should find all items in tree."
+        assert d.depth() <= math.ceil(1.44*math.log2(len(d))), "Should stay as balanced as an avl tree as long as " \
+                                                               "there are only insertions. "
 
     @staticmethod
     def test_perf_min():

@@ -3,35 +3,38 @@
 from cpython.weakref cimport PyWeakref_CheckRef, PyWeakref_NewRef, PyWeakref_GetObject
 cimport cython
 from amp_ostree.memstack cimport MemStack
+from libc.math cimport log2
 
 cdef inline size_t size_t_max(size_t a, size_t b) nogil:
-    return a if a > b else b
+    return a if (a >= b) else b
 
 #@cython.trashcan(True)
 @cython.no_gc_clear
 @cython.internal
 @cython.final
-cdef class _Node():
-    cdef readonly:
+cdef class _Node:
+    cdef public:
         _Node left
         _Node right
         object key
         object value
+        size_t size
         object parent_ref
-        size_t left_tree_size
-        size_t right_tree_size
-        size_t depth
     cdef object __weakref__
-
+    
+    def __repr__(self):
+        return f"<_Node object at id(self): "\
+            f"(key: {self.key}, value: {self.value}, size: {self.size})"
 
 @cython.no_gc_clear
 @cython.final
-cdef class OrderedTreeDict():
-    """ A dict based on an ordered statistic tree. """
+cdef class OrderedTreeDict:
+    """ A dict based on an ordered statistic SBT tree."""
     cdef readonly _Node root
     cdef object __weakref__
 
     def __cinit__(OrderedTreeDict self, object iterable=None, **kwargs):
+        self.root = None
         if iterable:
              self.update(iterable)
         if kwargs:
@@ -51,7 +54,6 @@ cdef class OrderedTreeDict():
             raise KeyError("Key not present.")
         return node
     
-    @cython.nonecheck(False)
     def get(OrderedTreeDict self, object key, default=None):
         cdef _Node node = self._get_node(key, raise_on_missing=False)
         if node is not None:
@@ -73,83 +75,152 @@ cdef class OrderedTreeDict():
             return None
         else:
             return PyWeakref_NewRef(node, None)
-        
-    @staticmethod
-    @cython.nonecheck(False)
-    cdef inline size_t _balance_factor(_Node node):
-        cdef size_t left_depth = node.left.depth + 1 if node.left is not None else 0
-        cdef size_t right_depth = node.right.depth + 1 if node.right is not None else 0
-        return right_depth - left_depth
-    
-    @staticmethod
-    @cython.nonecheck(False)
-    cdef inline size_t _recalculate_depth(_Node node):
-        node.depth = size_t_max(
-            node.left.depth + 1 if node.left is not None else 0,
-            node.right.depth + 1 if node.right is not None else 0
-        )
 
     @cython.nonecheck(False)
-    cdef inline _rotate_left(OrderedTreeDict self, _Node pivot):
-        cdef _Node right_node = pivot.right
-        cdef _Node pivot_parent = OrderedTreeDict._get_parent(pivot)
-        
-        # update the parent node
-        if pivot_parent is not None:
-            if pivot_parent.left is pivot:
-                pivot_parent.left = OrderedTreeDict._make_ref(right_node)
-            else:
-                pivot_parent.right = OrderedTreeDict._make_ref(right_node)
+    cpdef inline _rotate_right(OrderedTreeDict self, _Node t):
+        if t is None:
+            return
+        assert t.left is not None, "cannot rotate right"
+        # k <- left[t]
+        cdef _Node k = t.left
+        cdef _Node parent = OrderedTreeDict._get_parent(t)
+        cdef size_t left_size, right_size
+        # left[t] <- right[k]
+        t.left = k.right
+        if t.left is not None:
+            t.left.parent_ref = OrderedTreeDict._make_ref(t)
+        # right[k] <- t
+        k.right = t
+        if k.right is not None:
+            k.right.parent_ref = OrderedTreeDict._make_ref(k)
+        # s[k] <= s[t]
+        k.size = t.size
+        # s[t] <- s[left[t]] + s[right[t]] + 1
+        left_size = t.left.size if (t.left is not None) else 0
+        right_size = t.right.size if (t.right is not None) else 0
+        t.size = left_size  + right_size + 1
+        # t = k
+        if parent is None:
+            self.root = k
+            k.parent_ref = None
         else:
-            self.root = right_node
-            
-        right_node.parent_ref = pivot.parent_ref
-        
-        pivot.right = right_node.left
-        pivot.right_tree_size = right_node.right_tree_size
-        
-        if pivot.right is not None:
-            pivot.right.parent_ref = OrderedTreeDict._make_ref(pivot)
-        OrderedTreeDict._recalculate_depth(pivot)
-        pivot.parent_ref = OrderedTreeDict._make_ref(right_node)
-        
-        right_node.left = pivot
-        
-        right_node.left_tree_size = pivot.left_tree_size + pivot.right_tree_size + 1
-        OrderedTreeDict._recalculate_depth(right_node)
-        
-    @cython.nonecheck(False)
-    cdef inline _rotate_right(OrderedTreeDict self, _Node pivot):
-        cdef _Node left_node = pivot.left
-        cdef _Node pivot_parent = OrderedTreeDict._get_parent(pivot)
+            k.parent_ref = OrderedTreeDict._make_ref(parent)
+            if t is parent.left:
+                parent.left = k
+            elif t is parent.right:
+                parent.right = k
+            else:
+                assert False, "Node is not child of parent"
 
-        # update the parent node
-        if pivot_parent is not None:
-            if pivot_parent.left is pivot:
-                pivot_parent.left = OrderedTreeDict._make_ref(left_node)
-            else:
-                pivot_parent.right = OrderedTreeDict._make_ref(left_node)
+    @cython.nonecheck(False)
+    cpdef inline _rotate_left(OrderedTreeDict self, _Node t):
+        if t is None:
+            return
+        assert t.right is not None, "cannot rotate left"
+        # k <- right[t]
+        cdef _Node k = t.right
+        cdef _Node parent = OrderedTreeDict._get_parent(t)
+        cdef size_t left_size, right_size
+        # right[t] <- left[k]
+        t.right = k.left
+        if t.right is not None:
+            t.right.parent_ref = OrderedTreeDict._make_ref(t)
+        # left[k] <- t
+        k.left = t
+        if k.left is not None:
+            k.left.parent_ref = OrderedTreeDict._make_ref(k)
+        # s[k] <- s[t]
+        k.size = t.size
+        # s[t] <- s[left[t]] + s[right[t]] + 1
+        left_size = t.left.size if (t.left is not None) else 0
+        right_size = t.right.size if (t.right is not None) else 0
+        t.size = left_size  + right_size + 1
+        # t <- k
+        if parent is None:
+            # nothing in tree
+            self.root = k
+            k.parent_ref = None
         else:
-            self.root = left_node
-            
-        left_node.parent_ref = pivot.parent_ref
-        
-        pivot.left = left_node.right
-        pivot.left_tree_size = left_node.right_tree_size
-        
-        if pivot.left is not None:
-            pivot.left.parent_ref = OrderedTreeDict._make_ref(pivot)
-        OrderedTreeDict._recalculate_depth(pivot)
-        pivot.parent_ref = OrderedTreeDict._make_ref(left_node)
-        
-        left_node.right = pivot
-        left_node.right_tree_size = pivot.left_tree_size + pivot.right_tree_size + 1
-        OrderedTreeDict._recalculate_depth(left_node)
+            k.parent_ref = OrderedTreeDict._make_ref(parent)
+            if t is parent.left:
+                parent.left = k
+            elif t is parent.right:
+                parent.right = k
+            else:
+                assert False, "Node is not child of parent"
     
+    @cython.nonecheck(False)
+    cdef inline _maintain(OrderedTreeDict self, _Node t):
+        cdef size_t depth_factor, pushes_per_row, min_depth
+        cdef size_t t_left_size, t_left_left_size, t_left_right_size
+        cdef size_t t_right_size, t_right_right_size, t_right_left_size
+        cdef MemStack maintain_stack
+        
+        depth_factor = 2
+        pushes_per_row = 3
+        min_depth = <size_t>(log2(<double>t.size) + 1.0)
+        maintain_stack = MemStack(size=(pushes_per_row*depth_factor*min_depth)+1)
+        maintain_stack.c_push(t)
+        
+        while maintain_stack.num_items > 0:
+            t = maintain_stack.c_pop()
+            if t is None:
+                continue
+            
+            # calculate subtree sizes
+            t_left_size = 0
+            t_left_left_size = 0
+            t_left_right_size = 0
+            t_right_size = 0
+            t_right_right_size = 0
+            t_right_left_size = 0
+            if t.left is not None:
+                t_left_size = t.left.size
+                if t.left.left is not None:
+                    t_left_left_size = t.left.left.size
+                if t.left.right is not None:
+                    t_left_right_size = t.left.right.size
+            if t.right is not None:
+                t_right_size = t.right.size
+                if t.right.right is not None:
+                    t_right_right_size = t.right.right.size
+                if t.right.left is not None:
+                    t_right_left_size = t.right.left.size
+            
+            # perform fixup rotations
+            if t_left_left_size > t_right_size:
+                self._rotate_right(t)
+                maintain_stack.c_push(t)
+                maintain_stack.c_push(t.right)
+                continue
+            elif t_left_right_size > t_right_size:
+                if (t.left is not None) and (t.left.right is not None):
+                    self._rotate_left(t.left)
+                self._rotate_right(t)
+                maintain_stack.c_push(t)
+                maintain_stack.c_push(t.right)
+                maintain_stack.c_push(t.left)
+                continue
+            elif t_right_right_size > t_left_size:
+                self._rotate_left(t)
+                maintain_stack.c_push(t)
+                maintain_stack.c_push(t.left)
+                continue
+            elif t_right_left_size > t_left_size:
+                if (t.right is not None) and (t.right.left is not None):
+                    self._rotate_right(t.right)
+                self._rotate_left(t)
+                maintain_stack.c_push(t)
+                maintain_stack.c_push(t.right)
+                maintain_stack.c_push(t.left)
+                continue
+            else:
+                break
+        
     @cython.nonecheck(False)
     cdef inline _insert(OrderedTreeDict self, object key, object value, bint replace=True):
         cdef _Node insertion_node, next_node, new_node, parent_node, prev_parent_node
-        cdef size_t new_left_depth, new_right_depth, max_depth
+        cdef size_t left_size, right_size
         # Find insertion point
         insertion_node = None
         next_node = self.root
@@ -176,11 +247,9 @@ cdef class OrderedTreeDict():
         new_node = _Node()
         new_node.key = key
         new_node.value = value
-        new_node.depth = 0
+        new_node.size = 1
         new_node.left = None
-        new_node.left_tree_size = 0
         new_node.right = None
-        new_node.right_tree_size = 0
         
         # Insert at the correct place in the tree
         if insertion_node is None:
@@ -198,293 +267,65 @@ cdef class OrderedTreeDict():
                 # insert right
                 insertion_node.right = new_node
         
-        #Propagate subtree size information through the tree
-        prev_parent_node = new_node
         parent_node = insertion_node
+        parent_node.size += 1
         while parent_node is not None:
-            if prev_parent_node is parent_node.left:
-                parent_node.left_tree_size += 1
-            else:
-                parent_node.right_tree_size += 1
-            prev_parent_node = parent_node
+            left_size = parent_node.left.size if (parent_node.left is not None) else 0
+            right_size = parent_node.right.size if (parent_node.right is not None) else 0
+            parent_node.size = left_size  + right_size + 1
+            self._maintain(parent_node)
             parent_node = OrderedTreeDict._get_parent(parent_node)
-            
-        # Propagate depth information through the tree
-        prev_parent_node = new_node
-        parent_node = insertion_node
-        if (parent_node.left is not None) ^ (parent_node.right is not None):
-            # New node doesn't have a sibling, depth has changed.
-            parent_node.depth += 1
-            while parent_node is not None:
-        
-                new_left_depth = prev_parent_node.left.depth + 1 if prev_parent_node.left is not None else 0
-                new_right_depth = prev_parent_node.right.depth + 1 if prev_parent_node.right is not None else 0
-                max_depth = size_t_max(new_left_depth, new_right_depth)
-        
-                if prev_parent_node.depth != max_depth:
-                    prev_parent_node.depth = max_depth
-                else:
-                    break
-                
-                # Perform avl tree fixup rotations
-                if new_left_depth - 2 == new_right_depth:
-                    # left-right
-                    if OrderedTreeDict._balance_factor(prev_parent_node.left) > 0:
-                        self._rotate_left(prev_parent_node.left)
-                    self._rotate_right(prev_parent_node)
-                elif new_left_depth + 2 == new_right_depth:
-                    # left-right
-                    if OrderedTreeDict._balance_factor(prev_parent_node.right) > 0:
-                        self._rotate_right(prev_parent_node.right)
-                    self._rotate_left(prev_parent_node)
     
-            prev_parent_node = parent_node
-            parent_node = OrderedTreeDict._get_parent(prev_parent_node)
-    
-    @cython.nonecheck(False)
     cpdef put(OrderedTreeDict self, object key, object value):
         self._insert(key, value)
 
     @cython.nonecheck(False)
-    cdef inline _delete(OrderedTreeDict self, object key):
-        """
+    cdef inline _delete(OrderedTreeDict self, object key, bint raise_on_missing = True):
+        raise NotImplementedError("Need to add  delete.")
         
-	BOSNode *bubble_up = NULL;
-
-	// If this node has children on both sides, bubble one of it upwards
-	// and rotate within the subtrees.
-	if(node->left_child_node && node->right_child_node) {
-		BOSNode *candidate = NULL;
-		BOSNode *lost_child = NULL;
-		if(node->left_child_node->depth >= node->right_child_node->depth) {
-			// Left branch is deeper than right branch, might be a good idea to
-			// bubble from this side to maintain the AVL property with increased
-			// likelihood.
-			node->left_child_count--;
-			candidate = node->left_child_node;
-			while(candidate->right_child_node) {
-				candidate->right_child_count--;
-				candidate = candidate->right_child_node;
-			}
-			lost_child = candidate->left_child_node;
-		}
-		else {
-			node->right_child_count--;
-			candidate = node->right_child_node;
-			while(candidate->left_child_node) {
-				candidate->left_child_count--;
-				candidate = candidate->left_child_node;
-			}
-			lost_child = candidate->right_child_node;
-		}
-
-		BOSNode *bubble_start = candidate->parent_node;
-		if(bubble_start->left_child_node == candidate) {
-			bubble_start->left_child_node = lost_child;
-		}
-		else {
-			bubble_start->right_child_node = lost_child;
-		}
-		if(lost_child) {
-			lost_child->parent_node = bubble_start;
-		}
-
-		// We will later rebalance upwards from bubble_start up to candidate.
-		// But first, anchor candidate into the place where "node" used to be.
-
-		if(node->parent_node) {
-			if(node->parent_node->left_child_node == node) {
-				node->parent_node->left_child_node = candidate;
-			}
-			else {
-				node->parent_node->right_child_node = candidate;
-			}
-		}
-		else {
-			tree->root_node = candidate;
-		}
-		candidate->parent_node = node->parent_node;
-
-		candidate->left_child_node = node->left_child_node;
-		candidate->left_child_count = node->left_child_count;
-		candidate->right_child_node = node->right_child_node;
-		candidate->right_child_count = node->right_child_count;
-
-		if(candidate->left_child_node) {
-			candidate->left_child_node->parent_node = candidate;
-		}
-
-		if(candidate->right_child_node) {
-			candidate->right_child_node->parent_node = candidate;
-		}
-
-		// From here on, node is out of the game.
-		// Rebalance up to candidate.
-
-		if(bubble_start != node) {
-			while(bubble_start != candidate) {
-				bubble_start->depth = _imax((bubble_start->left_child_node ? bubble_start->left_child_node->depth + 1 : 0),
-					(bubble_start->right_child_node ? bubble_start->right_child_node->depth + 1 : 0));
-				int balance = _bostree_balance(bubble_start);
-				if(balance > 1) {
-					// Rotate left. Check for right-left case before.
-					if(_bostree_balance(bubble_start->right_child_node) < 0) {
-						_bostree_rotate_right(tree, bubble_start->right_child_node);
-					}
-					bubble_start = _bostree_rotate_left(tree, bubble_start);
-				}
-				else if(balance < -1) {
-					// Rotate right. Check for left-right case before.
-					if(_bostree_balance(bubble_start->left_child_node) > 0) {
-						_bostree_rotate_left(tree, bubble_start->left_child_node);
-					}
-					bubble_start = _bostree_rotate_right(tree, bubble_start);
-				}
-				bubble_start = bubble_start->parent_node;
-			}
-		}
-
-		// Fixup candidate's depth
-		candidate->depth = _imax((candidate->left_child_node ? candidate->left_child_node->depth + 1 : 0),
-			(candidate->right_child_node ? candidate->right_child_node->depth + 1 : 0));
-
-		// We'll have to fixup child counts and depths up to the root, do that
-		// later.
-		bubble_up = candidate->parent_node;
-
-		// Fix immediate parent node child count here.
-		if(bubble_up) {
-			if(bubble_up->left_child_node == candidate) {
-				bubble_up->left_child_count--;
-			}
-			else {
-				bubble_up->right_child_count--;
-			}
-		}
-	}
-	else {
-		// If this node has children on one side only, removing it is much simpler.
-		if(!node->parent_node) {
-			// Simple case: Node _was_ the old root.
-			if(node->left_child_node) {
-				tree->root_node = node->left_child_node;
-				if(node->left_child_node) {
-					node->left_child_node->parent_node = NULL;
-				}
-			}
-			else {
-				tree->root_node = node->right_child_node;
-				if(node->right_child_node) {
-					node->right_child_node->parent_node = NULL;
-				}
-			}
-
-			// No rebalancing to do
-			bubble_up = NULL;
-		}
-		else {
-			BOSNode *candidate = node->left_child_node;
-			int candidate_count = node->left_child_count;
-			if(node->right_child_node) {
-				candidate = node->right_child_node;
-				candidate_count = node->right_child_count;
-			}
-
-			if(node->parent_node->left_child_node == node) {
-				node->parent_node->left_child_node = candidate;
-				node->parent_node->left_child_count = candidate_count;
-			}
-			else {
-				node->parent_node->right_child_node = candidate;
-				node->parent_node->right_child_count = candidate_count;
-			}
-
-			if(candidate) {
-				candidate->parent_node = node->parent_node;
-			}
-
-			// Again, from here on, the original node is out of the game.
-			// Rebalance up to the root.
-			bubble_up = node->parent_node;
-		}
-	}
-
-	// At this point, everything below and including bubble_start is
-	// balanced, and we have to look further up.
-
-	char bubbling_finished = 0;
-	while(bubble_up) {
-		if(!bubbling_finished) {
-			// Calculate updated depth for bubble_up
-			unsigned int left_depth = bubble_up->left_child_node ? bubble_up->left_child_node->depth + 1 : 0;
-			unsigned int right_depth = bubble_up->right_child_node ? bubble_up->right_child_node->depth + 1 : 0;
-			unsigned int new_depth = _imax(left_depth, right_depth);
-			char depth_changed = (new_depth != bubble_up->depth);
-			bubble_up->depth = new_depth;
-
-			// Rebalance bubble_up
-			// Not necessary for the first node, but calling _bostree_balance once
-			// isn't that much overhead.
-			int balance = _bostree_balance(bubble_up);
-			if(balance < -1) {
-				if(_bostree_balance(bubble_up->left_child_node) > 0) {
-					_bostree_rotate_left(tree, bubble_up->left_child_node);
-				}
-				bubble_up = _bostree_rotate_right(tree, bubble_up);
-			}
-			else if(balance > 1) {
-				if(_bostree_balance(bubble_up->right_child_node) < 0) {
-					_bostree_rotate_right(tree, bubble_up->right_child_node);
-				}
-				bubble_up = _bostree_rotate_left(tree, bubble_up);
-			}
-			else {
-				if(!depth_changed) {
-					// If we neither had to rotate nor to change the depth,
-					// then we are obviously finished.  Only update child
-					// counts from here on.
-					bubbling_finished = 1;
-				}
-			}
-		}
-
-		if(bubble_up->parent_node) {
-			if(bubble_up->parent_node->left_child_node == bubble_up) {
-				bubble_up->parent_node->left_child_count--;
-			}
-			else {
-				bubble_up->parent_node->right_child_count--;
-			}
-		}
-		bubble_up = bubble_up->parent_node;
-	}
-
-	node->weak_ref_node_valid = 0;
-	bostree_node_weak_unref(tree, node);
-        """
-
-    @cython.nonecheck(False)
+        
+        cdef _Node node = self._get_node(key, raise_on_missing=raise_on_missing)
+        if node is None:
+            return None
+        
+        cdef _Node parent = self._get_parent(node)
+        if parent is None:
+            self.root = None
+            return node
+        
+        # If node is leaf, delete node.
+        # if node has one child, replace the node with it's child
+        # if node has two children, find it's successor and delete it recursively, copying it's key/value to this node.
+        # if the node has a right child, it's inorder successor is the minimum of the right children.
+        if node is parent.left:
+            parent.left = None
+        else: # node is parent.right
+            parent.right = None
+        
+        while parent is not None:
+            parent.size -= 1
+            self._maintain(parent)
+            parent = self._get_parent(parent)
+        
+        return node
+        
     def delete(OrderedTreeDict self, object key):
         self._delete(key)
 
-    @cython.nonecheck(False)
     cpdef update(OrderedTreeDict self, object items):
         cdef object key, value
         for key, value in items:
             self._insert(key, value)
-
-    @cython.nonecheck(False)
+            
     def clear(OrderedTreeDict self):
         """ Removes all entries from the dictionary. """
         self.root = None
     
-    @cython.nonecheck(False)
     def copy(OrderedTreeDict self):
         """ Shallow copy. """
         return OrderedTreeDict(self)
 
     @staticmethod
-    @cython.nonecheck(False)
     def fromkeys(object keys, object value=None) -> OrderedTreeDict:
         """The fromkeys() method creates a new dictionary from the given sequence of elements with a value provided by the user. """
         cdef object key
@@ -493,7 +334,6 @@ cdef class OrderedTreeDict():
              new_dict.put(key, value)
         return new_dict
     
-    @cython.nonecheck(False)
     def popitem(OrderedTreeDict self):
         """ The popitem() returns and removes an element (key, value) pair from the dictionary.
         """
@@ -503,7 +343,6 @@ cdef class OrderedTreeDict():
         self._delete(self.root.key)
         return node.key, node.value
 
-    @cython.nonecheck(False)
     def items(OrderedTreeDict self):
         """ Returns an iterator over (key, value) pairs."""
         cdef _Node node = self.root
@@ -511,7 +350,8 @@ cdef class OrderedTreeDict():
         if node is None:
             return
         try:
-            stack = MemStack(node.left_tree_size+node.right_tree_size+1)
+            # max tree depth for an sbt is 2*log(n)
+            stack = MemStack(2*<size_t>(log2(node.size))+1)
         except MemoryError:
             raise MemoryError("Not enough memory to iterate a tree this deep.")
         while node is not None:
@@ -525,31 +365,26 @@ cdef class OrderedTreeDict():
                 stack.c_push(node)
                 node = node.left
 
-    @cython.nonecheck(False)
     def keys(OrderedTreeDict self):
         """Returns an iterator over the dict keys."""
         cdef object key, value
         for key, value in self.items():
             yield key
     
-    @cython.nonecheck(False)
     def values(OrderedTreeDict self):
         """ Returns an iterator over the dict values."""
         cdef object key, value
         for key, value in self.items():
             yield value
 
-    @cython.nonecheck(False)
     def setdefault(OrderedTreeDict self, object key, object value):
         """Sets a key in the dictionary if it does not already exist."""
         self._insert(key, value, replace=False)
 
-    @cython.nonecheck(False)
     def pop(OrderedTreeDict self, object key):
         """ Returns and removes the value for key."""
-        cdef object retval = self._get_node(key)
-        self._delete(key)
-        return retval
+        cdef _Node node = self._delete(key)
+        return node.key, node.value
 
     @staticmethod
     @cython.nonecheck(False)
@@ -563,13 +398,11 @@ cdef class OrderedTreeDict():
             next_node = next_node.right
         return curr_node
 
-    @cython.nonecheck(False)
     def max(OrderedTreeDict self):
         cdef _Node max_node = OrderedTreeDict._maximum(self.root)
         return max_node.key, max_node.value
     
     @staticmethod
-    @cython.nonecheck(False)
     cdef inline _Node _minimum(_Node node):
         if node is None:
             raise KeyError("Dictionary is empty.")
@@ -580,70 +413,105 @@ cdef class OrderedTreeDict():
             next_node = next_node.left
         return curr_node
 
-    @cython.nonecheck(False)
     def min(OrderedTreeDict self):
         cdef _Node min_node = OrderedTreeDict._minimum(self.root)
         return min_node.key, min_node.value
     
+    @staticmethod
     @cython.nonecheck(False)
+    cdef inline _node_left_size(_Node node):
+        if node is None:
+            return 0
+        if node.left is None:
+            return 0
+        return node.left.size
+    
     def select(OrderedTreeDict self, size_t i):
         cdef _Node node = self.root
         if node is None:
             raise IndexError()
-        cdef size_t l = node.left_tree_size
-        while i != l and node is not None:
-            l = node.left_tree_size
-            if i < l:
+        cdef size_t r = OrderedTreeDict._node_left_size(node)
+        while i != r and node is not None:
+            if i < r:
                 node = node.left
             else:
                 node = node.right
-                i = i - (l + 1)
+                i = i - (r + 1)
+            r = OrderedTreeDict._node_left_size(node)
         if node is None:
-            raise IndexError()
+            raise IndexError("No such rank.")
         return node.key, node.value
     
-    @cython.nonecheck(False)
     def rank(OrderedTreeDict self, object key):
         cdef _Node node = self._get_node(key)
-        cdef size_t rank = node.left_tree_size + 1
+        cdef size_t rank = OrderedTreeDict._node_left_size(node) + 1
         cdef _Node parent_node = OrderedTreeDict._get_parent(node)
         while parent_node is not None:
             if node is parent_node.right:
-                rank = rank + parent_node.left_tree_size + 1
+                rank = rank + OrderedTreeDict._node_left_size(parent_node) + 1
             node = parent_node
             parent_node = OrderedTreeDict._get_parent(parent_node)
         return rank - 1
     
-    @cython.nonecheck(False)
+    cpdef size_t depth(OrderedTreeDict self):
+        """ Get the maximum depth of the tree.
+
+        Returns:
+            size_t: max_depth
+        """
+        if self.root is None:
+            return 0
+        node_stack = []
+        depth_stack = []
+        current_node = self.root
+        current_depth = 1
+        max_depth = 0
+        # Traverse down left branch nodes while pushing right nodes.
+        while current_node.right or current_node.left or node_stack:
+            # push right nodes onto stack
+            if current_node.right is not None:
+                node_stack.append(current_node.right)
+                depth_stack.append(current_depth + 1)
+            # Traverse left branches
+            if current_node.left:
+                current_depth += 1
+                current_node = current_node.left
+            else:
+                # Pop a right branch off the stack if no left branch
+                current_node = node_stack.pop()
+                current_depth = depth_stack.pop()
+            if max_depth < current_depth:
+                max_depth = current_depth
+            assert len(node_stack) == len(
+                depth_stack
+            ), "Node stack desynced from depth stack."
+        return max_depth
+    
     def __getitem__(OrderedTreeDict self, object key):
         cdef _Node node = self._get_node(key)
         return node.value
     
-    @cython.nonecheck(False)
     def __setitem__(OrderedTreeDict self, object key, object value):
         self._insert(key, value)
         
-    @cython.nonecheck(False)
     def __delitem__(OrderedTreeDict self, object key):
        self._delete(key)
 
-    @cython.nonecheck(False)
     def __contains__(OrderedTreeDict self, object key):
         return self._get_node(key, raise_on_missing=False) is not None
     
-    @cython.nonecheck(False)
     def __iter__(OrderedTreeDict self):
         """ Returns an iterator over (key, value) pairs."""
         return self.items()
 
-    @cython.nonecheck(False)
     def __reversed__(OrderedTreeDict self):
        cdef _Node node = self.root
        cdef MemStack stack
        if node is None:
            return
        try:
-           stack = MemStack(node.depth)
+           
+           stack = MemStack(2*<size_t>(log2(node.size))+1)
        except MemoryError:
            raise MemoryError("Not enough memory to iterate a tree this deep.")
        while node is not None:
@@ -657,8 +525,7 @@ cdef class OrderedTreeDict():
                stack.c_push(node)
                node = node.right
  
-    @cython.nonecheck(False)
     def __len__(OrderedTreeDict self):
         if self.root is None:
             return 0
-        return self.root.left_tree_size + self.root.right_tree_size + 1
+        return self.root.size
