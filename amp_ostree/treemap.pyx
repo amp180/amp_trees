@@ -12,10 +12,10 @@ cdef inline size_t size_t_max(size_t a, size_t b) nogil:
 @cython.no_gc_clear
 @cython.internal
 @cython.final
-cdef class _Node:
+cdef class _SBTDictNode:
     cdef:
-        _Node left
-        _Node right
+        _SBTDictNode left
+        _SBTDictNode right
         object key
         object value
         size_t size
@@ -30,7 +30,7 @@ cdef class _Node:
 @cython.final
 cdef class OrderedTreeDict:
     """ A dict based on an ordered statistic SBT tree."""
-    cdef readonly _Node root
+    cdef readonly _SBTDictNode root
     cdef object __weakref__
 
     def __cinit__(OrderedTreeDict self, object iterable=None, **kwargs):
@@ -42,7 +42,7 @@ cdef class OrderedTreeDict:
 
     @cython.nonecheck(False)
     cdef inline _get_node(OrderedTreeDict self, object key, bint raise_on_missing = True):
-        cdef _Node node = self.root
+        cdef _SBTDictNode node = self.root
         while node is not None:
             if key < node.key:
                 node = node.left
@@ -55,14 +55,14 @@ cdef class OrderedTreeDict:
         return node
     
     def get(OrderedTreeDict self, object key, default=None):
-        cdef _Node node = self._get_node(key, raise_on_missing=False)
+        cdef _SBTDictNode node = self._get_node(key, raise_on_missing=False)
         if node is not None:
             return node.value
         return default
     
     @staticmethod
     @cython.nonecheck(False)
-    cdef inline _Node _get_parent(_Node node):
+    cdef inline _SBTDictNode _get_parent(_SBTDictNode node):
         if PyWeakref_CheckRef(node.parent_ref):
             return <object> PyWeakref_GetObject(node.parent_ref)
         else:
@@ -70,20 +70,20 @@ cdef class OrderedTreeDict:
     
     @staticmethod
     @cython.nonecheck(False)
-    cdef inline object _make_ref(_Node node):
+    cdef inline object _make_ref(_SBTDictNode node):
         if node is None:
             return None
         else:
             return PyWeakref_NewRef(node, None)
 
     @cython.nonecheck(False)
-    cpdef inline _rotate_right(OrderedTreeDict self, _Node t):
+    cpdef inline _rotate_right(OrderedTreeDict self, _SBTDictNode t):
         if t is None:
             return
         assert t.left is not None, "cannot rotate right"
         # k <- left[t]
-        cdef _Node k = t.left
-        cdef _Node parent = OrderedTreeDict._get_parent(t)
+        cdef _SBTDictNode k = t.left
+        cdef _SBTDictNode parent = OrderedTreeDict._get_parent(t)
         cdef size_t left_size, right_size
         # left[t] <- right[k]
         t.left = k.right
@@ -113,13 +113,13 @@ cdef class OrderedTreeDict:
                 assert False, "Node is not child of parent"
 
     @cython.nonecheck(False)
-    cpdef inline _rotate_left(OrderedTreeDict self, _Node t):
+    cpdef inline _rotate_left(OrderedTreeDict self, _SBTDictNode t):
         if t is None:
             return
         assert t.right is not None, "cannot rotate left"
         # k <- right[t]
-        cdef _Node k = t.right
-        cdef _Node parent = OrderedTreeDict._get_parent(t)
+        cdef _SBTDictNode k = t.right
+        cdef _SBTDictNode parent = OrderedTreeDict._get_parent(t)
         cdef size_t left_size, right_size
         # right[t] <- left[k]
         t.right = k.left
@@ -150,7 +150,7 @@ cdef class OrderedTreeDict:
                 assert False, "Node is not child of parent"
     
     @cython.nonecheck(False)
-    cdef inline _maintain(OrderedTreeDict self, _Node t):
+    cdef inline _maintain(OrderedTreeDict self, _SBTDictNode t):
         cdef size_t depth_factor, pushes_per_row, min_depth
         cdef size_t t_left_size, t_left_left_size, t_left_right_size
         cdef size_t t_right_size, t_right_right_size, t_right_left_size
@@ -219,7 +219,7 @@ cdef class OrderedTreeDict:
         
     @cython.nonecheck(False)
     cdef inline _insert(OrderedTreeDict self, object key, object value, bint replace=True):
-        cdef _Node insertion_node, next_node, new_node, parent_node, prev_parent_node
+        cdef _SBTDictNode insertion_node, next_node, new_node, parent_node, prev_parent_node
         cdef size_t left_size, right_size
         # Find insertion point
         insertion_node = None
@@ -244,7 +244,7 @@ cdef class OrderedTreeDict:
                 return
 
         # Create new node
-        new_node = _Node()
+        new_node = _SBTDictNode()
         new_node.key = key
         new_node.value = value
         new_node.size = 1
@@ -280,19 +280,19 @@ cdef class OrderedTreeDict:
         self._insert(key, value)
 
     @staticmethod
-    cdef inline _decrement_ancestor_sizes(_Node node):
+    cdef inline _decrement_ancestor_sizes(_SBTDictNode node):
         node = OrderedTreeDict._get_parent(node)
         while node is not None:
             node.size -= 1
             node = OrderedTreeDict._get_parent(node)
 
     @cython.nonecheck(False)
-    cdef inline _delete(OrderedTreeDict self, _Node node):
+    cdef inline _delete(OrderedTreeDict self, _SBTDictNode node):
         if node is None:
             return None
         
-        cdef _Node successor
-        cdef _Node parent = OrderedTreeDict._get_parent(node)
+        cdef _SBTDictNode successor
+        cdef _SBTDictNode parent = OrderedTreeDict._get_parent(node)
         
         # If node is leaf, delete node.
         if (node.left is None) and (node.right is None):
@@ -333,7 +333,7 @@ cdef class OrderedTreeDict:
             return node
         
     def delete(OrderedTreeDict self, object key):
-        cdef _Node node = self._get_node(key)
+        cdef _SBTDictNode node = self._get_node(key)
         self._delete(node)
 
     cpdef update(OrderedTreeDict self, object items):
@@ -363,13 +363,13 @@ cdef class OrderedTreeDict:
         """
         if self.root is None:
             raise KeyError()
-        cdef _Node node = self.root
+        cdef _SBTDictNode node = self.root
         self._delete(node)
         return node.key, node.value
 
     def items(OrderedTreeDict self):
         """ Returns an iterator over (key, value) pairs."""
-        cdef _Node node = self.root
+        cdef _SBTDictNode node = self.root
         cdef MemStack stack
         if node is None:
             return
@@ -407,44 +407,44 @@ cdef class OrderedTreeDict:
 
     def pop(OrderedTreeDict self, object key):
         """ Returns and removes the value for key."""
-        cdef _Node node = self._get(key)
+        cdef _SBTDictNode node = self._get(key)
         self._delete(node)
         return node.key, node.value
 
     @staticmethod
     @cython.nonecheck(False)
-    cdef inline _Node _maximum(_Node node):
+    cdef inline _SBTDictNode _maximum(_SBTDictNode node):
         if node is None:
             raise KeyError("Dictionary is empty.")
-        cdef _Node curr_node = None
-        cdef _Node next_node = node
+        cdef _SBTDictNode curr_node = None
+        cdef _SBTDictNode next_node = node
         while next_node is not None:
             curr_node = next_node
             next_node = next_node.right
         return curr_node
 
     def max(OrderedTreeDict self):
-        cdef _Node max_node = OrderedTreeDict._maximum(self.root)
+        cdef _SBTDictNode max_node = OrderedTreeDict._maximum(self.root)
         return max_node.key, max_node.value
     
     @staticmethod
-    cdef inline _Node _minimum(_Node node):
+    cdef inline _SBTDictNode _minimum(_SBTDictNode node):
         if node is None:
             raise KeyError("Dictionary is empty.")
-        cdef _Node curr_node = None
-        cdef _Node next_node = node
+        cdef _SBTDictNode curr_node = None
+        cdef _SBTDictNode next_node = node
         while next_node is not None:
             curr_node = next_node
             next_node = next_node.left
         return curr_node
 
     def min(OrderedTreeDict self):
-        cdef _Node min_node = OrderedTreeDict._minimum(self.root)
+        cdef _SBTDictNode min_node = OrderedTreeDict._minimum(self.root)
         return min_node.key, min_node.value
     
     @staticmethod
     @cython.nonecheck(False)
-    cdef inline size_t _node_left_size(_Node node):
+    cdef inline size_t _node_left_size(_SBTDictNode node):
         if node is None:
             return 0
         if node.left is None:
@@ -452,7 +452,7 @@ cdef class OrderedTreeDict:
         return node.left.size
     
     def select(OrderedTreeDict self, size_t i):
-        cdef _Node node = self.root
+        cdef _SBTDictNode node = self.root
         if node is None:
             raise IndexError()
         cdef size_t r = OrderedTreeDict._node_left_size(node)
@@ -468,9 +468,9 @@ cdef class OrderedTreeDict:
         return node.key, node.value
     
     def rank(OrderedTreeDict self, object key):
-        cdef _Node node = self._get_node(key)
+        cdef _SBTDictNode node = self._get_node(key)
         cdef size_t rank = OrderedTreeDict._node_left_size(node) + 1
-        cdef _Node parent_node = OrderedTreeDict._get_parent(node)
+        cdef _SBTDictNode parent_node = OrderedTreeDict._get_parent(node)
         while parent_node is not None:
             if node is parent_node.right:
                 rank = rank + OrderedTreeDict._node_left_size(parent_node) + 1
@@ -480,8 +480,8 @@ cdef class OrderedTreeDict:
     
     @staticmethod
     @cython.nonecheck(False)
-    cdef inline _successor(_Node node):
-        cdef _Node parent = OrderedTreeDict._get_parent(node)
+    cdef inline _successor(_SBTDictNode node):
+        cdef _SBTDictNode parent = OrderedTreeDict._get_parent(node)
         if node.right is not None:
             return OrderedTreeDict._minimum(node.right)
         while (parent is not None) and (node is parent.right):
@@ -490,15 +490,15 @@ cdef class OrderedTreeDict:
         return parent
     
     def successor(OrderedTreeDict self, object key):
-        cdef _Node node = self._get_node(key)
+        cdef _SBTDictNode node = self._get_node(key)
         node = OrderedTreeDict._successor(node)
         if node is not None:
             return node.key, node.value
         
     @staticmethod
     @cython.nonecheck(False)
-    cdef inline _predecessor(_Node node):
-        cdef _Node parent = OrderedTreeDict._get_parent(node)
+    cdef inline _predecessor(_SBTDictNode node):
+        cdef _SBTDictNode parent = OrderedTreeDict._get_parent(node)
         if node.left is not None:
             return OrderedTreeDict._maximum(node.left)
         while (parent is not None) and (node is parent.left):
@@ -507,7 +507,7 @@ cdef class OrderedTreeDict:
         return parent
     
     def predecessor(OrderedTreeDict self, object key):
-        cdef _Node node = self._get_node(key)
+        cdef _SBTDictNode node = self._get_node(key)
         node = OrderedTreeDict._predecessor(node)
         if node is not None:
             return node.key, node.value
@@ -522,7 +522,7 @@ cdef class OrderedTreeDict:
             return 0
         node_stack = []
         depth_stack = []
-        cdef _Node current_node = self.root
+        cdef _SBTDictNode current_node = self.root
         cdef size_t current_depth = 1
         cdef size_t max_depth = 0
         # Traverse down left branch nodes while pushing right nodes.
@@ -547,7 +547,7 @@ cdef class OrderedTreeDict:
         return max_depth
     
     def __getitem__(OrderedTreeDict self, object key):
-        cdef _Node node = self._get_node(key)
+        cdef _SBTDictNode node = self._get_node(key)
         return node.value
     
     def __setitem__(OrderedTreeDict self, object key, object value):
@@ -564,7 +564,7 @@ cdef class OrderedTreeDict:
         return self.items()
 
     def __reversed__(OrderedTreeDict self):
-       cdef _Node node = self.root
+       cdef _SBTDictNode node = self.root
        cdef MemStack stack
        if node is None:
            return
