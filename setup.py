@@ -41,7 +41,7 @@ setup(
     ext_modules=modules,
     packages=find_packages(),
     package_data={'amp_ostree': glob.glob("amp_ostree/*.((pyx)|(.pxd)|(c))"),}, # Include pyx and c files in sdist
-    include_package_date=True, # Don't install the pyx files with the bdist.
+    include_package_data=True, # Don't install the pyx files with the bdist.
     version=__version__,
     cmdclass = {'build_ext': build_ext} if USING_CYTHON else {}
 

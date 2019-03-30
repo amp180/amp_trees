@@ -4,6 +4,7 @@ from random import randint
 import timeit
 import math
 
+
 class OrderedTreeDictTest(TestCase):
     
     @staticmethod
@@ -71,8 +72,6 @@ class OrderedTreeDictTest(TestCase):
     @staticmethod
     def test_select_simple():
         d = OrderedTreeDict([(0, 0), (1, 1), (2, 2)])
-        assert d.root.left is not None
-        assert d.root.right is not None
         assert len(d) == 3
         assert (d.select(0) == (0, 0))
         assert(d.select(1) == (1, 1))
@@ -81,8 +80,6 @@ class OrderedTreeDictTest(TestCase):
     @staticmethod
     def test_rank_simple():
         d = OrderedTreeDict([(0, 0), (1, 1), (2, 2)])
-        assert d.root.left is not None
-        assert d.root.right is not None
         assert len(d) == 3
         assert (d.rank(0) == 0)
         assert (d.rank(1) == 1)
@@ -124,6 +121,39 @@ class OrderedTreeDictTest(TestCase):
         assert len(keys) == len(list(keys)), "Iteration should find all items in tree."
         assert d.depth() <= math.ceil(1.44*math.log2(len(d))), "Should stay as balanced as an avl tree as long as " \
                                                                "there are only insertions. "
+
+    @staticmethod
+    def test_deletion():
+        d = OrderedTreeDict()
+        d.put(0, 0)
+        d.put(-1, -1)
+        d.put(1, 1)
+        assert len(d) == 3, "Length should reflect number of items inserted,"
+        assert 0 in d
+        d.delete(0)
+        assert len(d) == 2
+        assert 0 not in d
+        d.delete(1)
+        assert len(d) == 1
+        assert 1 not in d
+
+    @staticmethod
+    def test_successor():
+        d = OrderedTreeDict()
+        d.put(0, 0)
+        d.put(-1, -1)
+        d.put(1, 1)
+        assert d.successor(-1) == (0, 0)
+        assert d.successor(0) == (1, 1)
+
+    @staticmethod
+    def test_predecessor():
+        d = OrderedTreeDict()
+        d.put(0, 0)
+        d.put(-1, -1)
+        d.put(1, 1)
+        assert d.predecessor(0) == (-1, -1)
+        assert d.predecessor(1) == (0, 0)
 
     @staticmethod
     def test_perf_min():

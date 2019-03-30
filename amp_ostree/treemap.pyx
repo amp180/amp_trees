@@ -13,7 +13,7 @@ cdef inline size_t size_t_max(size_t a, size_t b) nogil:
 @cython.internal
 @cython.final
 cdef class _Node:
-    cdef public:
+    cdef:
         _Node left
         _Node right
         object key
@@ -279,38 +279,62 @@ cdef class OrderedTreeDict:
     cpdef put(OrderedTreeDict self, object key, object value):
         self._insert(key, value)
 
+    @staticmethod
+    cdef inline _decrement_ancestor_sizes(_Node node):
+        node = OrderedTreeDict._get_parent(node)
+        while node is not None:
+            node.size -= 1
+            node = OrderedTreeDict._get_parent(node)
+
     @cython.nonecheck(False)
-    cdef inline _delete(OrderedTreeDict self, object key, bint raise_on_missing = True):
-        raise NotImplementedError("Need to add  delete.")
-        
-        
-        cdef _Node node = self._get_node(key, raise_on_missing=raise_on_missing)
+    cdef inline _delete(OrderedTreeDict self, _Node node):
         if node is None:
             return None
         
-        cdef _Node parent = self._get_parent(node)
-        if parent is None:
-            self.root = None
-            return node
+        cdef _Node successor
+        cdef _Node parent = OrderedTreeDict._get_parent(node)
         
         # If node is leaf, delete node.
+        if (node.left is None) and (node.right is None):
+            if parent is None:
+                self.root = None
+            elif node is parent.left:
+                parent.left = None
+            elif node is parent.right:
+                parent.right = None
+            OrderedTreeDict._decrement_ancestor_sizes(node)
+            return node
         # if node has one child, replace the node with it's child
+        elif (node.left is None) ^ (node.right is None):
+            if parent is None:
+                if node.left is not None:
+                    self.root = node.left
+                else:
+                    self.root = node.right
+            elif node is parent.left:
+                if node.left is not None:
+                    parent.left = node.left
+                else:
+                    parent.left = node.right
+            else: # node is parent.right
+                if node.left is node:
+                    parent.right = node.left
+                else:
+                    parent.right = node.right
+            OrderedTreeDict._decrement_ancestor_sizes(node)
+            return node
         # if node has two children, find it's successor and delete it recursively, copying it's key/value to this node.
         # if the node has a right child, it's inorder successor is the minimum of the right children.
-        if node is parent.left:
-            parent.left = None
-        else: # node is parent.right
-            parent.right = None
-        
-        while parent is not None:
-            parent.size -= 1
-            self._maintain(parent)
-            parent = self._get_parent(parent)
-        
-        return node
+        else:
+            # need to implement _successor
+            successor = OrderedTreeDict._successor(node)
+            node.key, node.value = successor.key, successor.value
+            self._delete(successor)
+            return node
         
     def delete(OrderedTreeDict self, object key):
-        self._delete(key)
+        cdef _Node node = self._get_node(key)
+        self._delete(node)
 
     cpdef update(OrderedTreeDict self, object items):
         cdef object key, value
@@ -340,7 +364,7 @@ cdef class OrderedTreeDict:
         if self.root is None:
             raise KeyError()
         cdef _Node node = self.root
-        self._delete(self.root.key)
+        self._delete(node)
         return node.key, node.value
 
     def items(OrderedTreeDict self):
@@ -383,7 +407,8 @@ cdef class OrderedTreeDict:
 
     def pop(OrderedTreeDict self, object key):
         """ Returns and removes the value for key."""
-        cdef _Node node = self._delete(key)
+        cdef _Node node = self._get(key)
+        self._delete(node)
         return node.key, node.value
 
     @staticmethod
@@ -419,7 +444,7 @@ cdef class OrderedTreeDict:
     
     @staticmethod
     @cython.nonecheck(False)
-    cdef inline _node_left_size(_Node node):
+    cdef inline size_t _node_left_size(_Node node):
         if node is None:
             return 0
         if node.left is None:
@@ -453,6 +478,40 @@ cdef class OrderedTreeDict:
             parent_node = OrderedTreeDict._get_parent(parent_node)
         return rank - 1
     
+    @staticmethod
+    @cython.nonecheck(False)
+    cdef inline _successor(_Node node):
+        cdef _Node parent = OrderedTreeDict._get_parent(node)
+        if node.right is not None:
+            return OrderedTreeDict._minimum(node.right)
+        while (parent is not None) and (node is parent.right):
+            node = parent
+            parent = OrderedTreeDict._get_parent(parent)
+        return parent
+    
+    def successor(OrderedTreeDict self, object key):
+        cdef _Node node = self._get_node(key)
+        node = OrderedTreeDict._successor(node)
+        if node is not None:
+            return node.key, node.value
+        
+    @staticmethod
+    @cython.nonecheck(False)
+    cdef inline _predecessor(_Node node):
+        cdef _Node parent = OrderedTreeDict._get_parent(node)
+        if node.left is not None:
+            return OrderedTreeDict._maximum(node.left)
+        while (parent is not None) and (node is parent.left):
+            node = parent
+            parent = OrderedTreeDict._get_parent(parent)
+        return parent
+    
+    def predecessor(OrderedTreeDict self, object key):
+        cdef _Node node = self._get_node(key)
+        node = OrderedTreeDict._predecessor(node)
+        if node is not None:
+            return node.key, node.value
+    
     cpdef size_t depth(OrderedTreeDict self):
         """ Get the maximum depth of the tree.
 
@@ -463,9 +522,9 @@ cdef class OrderedTreeDict:
             return 0
         node_stack = []
         depth_stack = []
-        current_node = self.root
-        current_depth = 1
-        max_depth = 0
+        cdef _Node current_node = self.root
+        cdef size_t current_depth = 1
+        cdef size_t max_depth = 0
         # Traverse down left branch nodes while pushing right nodes.
         while current_node.right or current_node.left or node_stack:
             # push right nodes onto stack
@@ -510,7 +569,7 @@ cdef class OrderedTreeDict:
        if node is None:
            return
        try:
-           
+           # depth bound is 2*log2(n)
            stack = MemStack(2*<size_t>(log2(node.size))+1)
        except MemoryError:
            raise MemoryError("Not enough memory to iterate a tree this deep.")
