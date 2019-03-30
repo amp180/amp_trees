@@ -181,6 +181,54 @@ class OrderedTreeDictTest(TestCase):
         assert d.predecessor(1) == (0, 0)
 
     @staticmethod
+    def test_fromkeys():
+        d = OrderedTreeDict.fromkeys(['a', 'b', 'c'], 1)
+        assert 'a' in d
+        assert 'b' in d
+        assert 'c' in d
+        assert d['a'] == 1
+        assert d['b'] == 1
+        assert d['c'] == 1
+
+    @staticmethod
+    def test_pop():
+        d = OrderedTreeDict({'a': 'a'}.items())
+        assert d.pop('a') == ('a', 'a')
+        assert 'a' not in d
+    
+    @staticmethod
+    def test_pop_item():
+        d = OrderedTreeDict({'a': 'a'}.items())
+        assert d.popitem() == ('a', 'a')
+        assert 'a' not in d
+
+    @staticmethod
+    def test_copy():
+        d = OrderedTreeDict.fromkeys(['a', 'b'], 1)
+        e = d.copy()
+        assert d is not e
+        assert 'a' in e
+        assert 'b' in e
+        assert e['a'] == 1
+        assert e['b'] == 1
+        
+    @staticmethod
+    def test_clear():
+        d = OrderedTreeDict.fromkeys(['a', 'b'], 1)
+        d.clear()
+        assert len(d) == 0
+        assert d.get('b') is None
+
+    @staticmethod
+    def test_magic_methods():
+        d = OrderedTreeDict()
+        d['a'] = 'a'
+        assert 'a' in d
+        assert d['a'] == 'a'
+        del d['a']
+        assert 'a' not in d
+
+    @staticmethod
     def test_perf_min():
         """Tests that finding the smallest key of a large treedict is faster than using dict."""
         dict_time = timeit.timeit(

@@ -407,7 +407,7 @@ cdef class OrderedTreeDict:
 
     def pop(OrderedTreeDict self, object key):
         """ Returns and removes the value for key."""
-        cdef _SBTDictNode node = self._get(key)
+        cdef _SBTDictNode node = self._get_node(key)
         self._delete(node)
         return node.key, node.value
 
@@ -545,14 +545,15 @@ cdef class OrderedTreeDict:
         self._insert(key, value)
         
     def __delitem__(OrderedTreeDict self, object key):
-       self._delete(key)
+        cdef _SBTDictNode node = self._get_node(key)
+        self._delete(node)
 
     def __contains__(OrderedTreeDict self, object key):
         return self._get_node(key, raise_on_missing=False) is not None
     
     def __iter__(OrderedTreeDict self):
         """ Returns an iterator over (key, value) pairs."""
-        return self.items()
+        return self.keys()
 
     def __reversed__(OrderedTreeDict self):
         if self.root is None:
