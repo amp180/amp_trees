@@ -306,6 +306,7 @@ cdef class OrderedTreeDict:
 
     @cython.nonecheck(False)
     cdef inline _delete(OrderedTreeDict self, _SBTDictNode node):
+        # need to update parent ptrs
         if node is None:
             return None
         
