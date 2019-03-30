@@ -4,6 +4,7 @@ from random import randint
 import timeit
 import math
 
+
 class OrderedTreeDictTest(TestCase):
     
     @staticmethod
@@ -227,6 +228,12 @@ class OrderedTreeDictTest(TestCase):
         assert d['a'] == 'a'
         del d['a']
         assert 'a' not in d
+        try:
+            d['a']
+        except KeyError:
+            pass
+        else:
+            assert False
 
     @staticmethod
     def test_perf_min():
