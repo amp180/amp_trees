@@ -1,7 +1,8 @@
+#!python
+#cython: language_level=3
 from cpython.mem cimport PyMem_Malloc, PyMem_Free
 from cpython.ref cimport PyObject, Py_DECREF
 cimport cython
-from memstack cimport MemStack
 
 @cython.final
 @cython.no_gc_clear

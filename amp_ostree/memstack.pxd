@@ -1,3 +1,5 @@
+#!python
+#cython: language_level=3
 from cpython.ref cimport PyObject, Py_INCREF, Py_DECREF
 cimport cython
 

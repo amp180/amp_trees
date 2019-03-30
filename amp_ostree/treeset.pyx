@@ -1,3 +1,5 @@
+#!python
+#cython: language_level=3
 from cpython.weakref cimport PyWeakref_CheckRef, PyWeakref_NewRef, PyWeakref_GetObject
 cimport cython
 from amp_ostree.memstack cimport MemStack
@@ -290,11 +292,11 @@ cdef class OrderedTreeSet:
             self._maintain(parent_node)
             parent_node = OrderedTreeSet._get_parent(parent_node)
             
-    @staticmethod
-    cdef inline _decrement_ancestor_sizes(_SBTSetNode node):
+    cdef inline _deletion_maintain(OrderedTreeSet self, _SBTSetNode node):
         node = OrderedTreeSet._get_parent(node)
         while node is not None:
             node.size -= 1
+            self._maintain(node)
             node = OrderedTreeSet._get_parent(node)
 
     @cython.nonecheck(False)
@@ -313,7 +315,7 @@ cdef class OrderedTreeSet:
                 parent.left = None
             elif node is parent.right:
                 parent.right = None
-            OrderedTreeSet._decrement_ancestor_sizes(node)
+            self._deletion_maintain(node)
             return node
         # if node has one child, replace the node with it's child
         elif (node.left is None) ^ (node.right is None):
@@ -332,7 +334,7 @@ cdef class OrderedTreeSet:
                     parent.right = node.left
                 else:
                     parent.right = node.right
-            OrderedTreeSet._decrement_ancestor_sizes(node)
+            self._deletion_maintain(node)
             return node
         # if node has two children, find it's successor and delete it recursively, copying it's key/value to this node.
         # if the node has a right child, it's inorder successor is the minimum of the right children.

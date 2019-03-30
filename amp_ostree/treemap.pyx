@@ -297,11 +297,11 @@ cdef class OrderedTreeDict:
     cpdef put(OrderedTreeDict self, object key, object value):
         self._insert(key, value)
 
-    @staticmethod
-    cdef inline _decrement_ancestor_sizes(_SBTDictNode node):
+    cdef inline _deletion_maintain(OrderedTreeDict self,_SBTDictNode node):
         node = OrderedTreeDict._get_parent(node)
         while node is not None:
             node.size -= 1
+            self._maintain(node)
             node = OrderedTreeDict._get_parent(node)
 
     @cython.nonecheck(False)
@@ -320,7 +320,7 @@ cdef class OrderedTreeDict:
                 parent.left = None
             elif node is parent.right:
                 parent.right = None
-            OrderedTreeDict._decrement_ancestor_sizes(node)
+            self._deletion_maintain(node)
             return node
         # if node has one child, replace the node with it's child
         elif (node.left is None) ^ (node.right is None):
@@ -339,7 +339,7 @@ cdef class OrderedTreeDict:
                     parent.right = node.left
                 else:
                     parent.right = node.right
-            OrderedTreeDict._decrement_ancestor_sizes(node)
+            self._deletion_maintain(node)
             return node
         # if node has two children, find it's successor and delete it recursively, copying it's key/value to this node.
         # if the node has a right child, it's inorder successor is the minimum of the right children.
