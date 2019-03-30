@@ -330,16 +330,21 @@ cdef class OrderedTreeDict:
                     self.root = node.left
                 else:
                     self.root = node.right
+                node.parent_ref = None
             elif node is parent.left:
                 if node.left is not None:
                     parent.left = node.left
+                    node.left.parent_ref = OrderedTreeDict._make_ref(parent)
                 else:
                     parent.left = node.right
+                    node.right.parent_ref = OrderedTreeDict._make_ref(parent)
             else: # node is parent.right
                 if node.left is node:
                     parent.right = node.left
+                    node.left.parent_ref = OrderedTreeDict._make_ref(parent)
                 else:
                     parent.right = node.right
+                    node.right.parent_ref = OrderedTreeDict._make_ref(parent)
             self._deletion_maintain(node)
             return node
         # if node has two children, find it's successor and delete it recursively, copying it's key/value to this node.

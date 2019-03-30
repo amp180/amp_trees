@@ -104,7 +104,7 @@ class OrderedTreeDictTest(TestCase):
         ))
         
     @staticmethod
-    def test_fuzz_insertions():
+    def test_fuzz_deletions():
         """A test that inserts random keys into the tree and checks that they were all inserted."""
         key_range = 2**64
         value_range = 1024
@@ -146,7 +146,7 @@ class OrderedTreeDictTest(TestCase):
         assert 1 not in d
 
     @staticmethod
-    def test_fuzz_deletions():
+    def test_fuzz_insertions():
         """A test that inserts random keys into the tree and checks that they were all inserted."""
         key_range = 2 ** 64
         value_range = 1024
