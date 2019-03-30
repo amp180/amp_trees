@@ -73,6 +73,24 @@ cdef class OrderedTreeSet:
         else:
             return PyWeakref_NewRef(node, None)
 
+    @staticmethod
+    @cython.nonecheck(False)
+    cdef inline size_t _node_left_size(_SBTSetNode node):
+        if node is None:
+            return 0
+        if node.left is None:
+            return 0
+        return node.left.size
+    
+    @staticmethod
+    @cython.nonecheck(False)
+    cdef inline size_t _node_right_size(_SBTSetNode node):
+        if node is None:
+            return 0
+        if node.right is None:
+            return 0
+        return node.right.size
+
     @cython.nonecheck(False)
     cpdef inline _rotate_right(OrderedTreeSet self, _SBTSetNode t):
         if t is None:
@@ -93,9 +111,9 @@ cdef class OrderedTreeSet:
         # s[k] <= s[t]
         k.size = t.size
         # s[t] <- s[left[t]] + s[right[t]] + 1
-        left_size = t.left.size if (t.left is not None) else 0
-        right_size = t.right.size if (t.right is not None) else 0
-        t.size = left_size  + right_size + 1
+        left_size = OrderedTreeSet._node_left_size(t)
+        right_size = OrderedTreeSet._node_right_size(t)
+        t.size = left_size + right_size + 1
         # t = k
         if parent is None:
             self.root = k
@@ -129,9 +147,9 @@ cdef class OrderedTreeSet:
         # s[k] <- s[t]
         k.size = t.size
         # s[t] <- s[left[t]] + s[right[t]] + 1
-        left_size = t.left.size if (t.left is not None) else 0
-        right_size = t.right.size if (t.right is not None) else 0
-        t.size = left_size  + right_size + 1
+        left_size = OrderedTreeSet._node_left_size(t)
+        right_size = OrderedTreeSet._node_right_size(t)
+        t.size = left_size + right_size + 1
         # t <- k
         if parent is None:
             # nothing in tree
@@ -266,8 +284,8 @@ cdef class OrderedTreeSet:
         parent_node = insertion_node
         parent_node.size += 1
         while parent_node is not None:
-            left_size = parent_node.left.size if (parent_node.left is not None) else 0
-            right_size = parent_node.right.size if (parent_node.right is not None) else 0
+            left_size = OrderedTreeSet._node_left_size(parent_node)
+            right_size = OrderedTreeSet._node_right_size(parent_node)
             parent_node.size = left_size  + right_size + 1
             self._maintain(parent_node)
             parent_node = OrderedTreeSet._get_parent(parent_node)
@@ -378,15 +396,6 @@ cdef class OrderedTreeSet:
     def min(OrderedTreeSet self):
         cdef _SBTSetNode min_node = OrderedTreeSet._minimum(self.root)
         return min_node.value
-    
-    @staticmethod
-    @cython.nonecheck(False)
-    cdef inline size_t _node_left_size(_SBTSetNode node):
-        if node is None:
-            return 0
-        if node.left is None:
-            return 0
-        return node.left.size
     
     def select(OrderedTreeSet self, size_t i):
         cdef _SBTSetNode node = self.root
