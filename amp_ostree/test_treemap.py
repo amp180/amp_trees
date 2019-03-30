@@ -3,7 +3,6 @@ from amp_ostree.treemap import OrderedTreeDict
 from random import randint
 import timeit
 import math
-from itertools import islice
 
 class OrderedTreeDictTest(TestCase):
     
@@ -102,48 +101,6 @@ class OrderedTreeDictTest(TestCase):
         assert all(list(
             keys[d.rank(k)] == k for k in keys
         ))
-        
-    @staticmethod
-    def test_fuzz_deletions():
-        """A test that inserts random keys into the tree and checks that they were all inserted."""
-        key_range = 2**64
-        value_range = 1024
-        key_set = set()
-        
-        d = OrderedTreeDict()
-        for value in range(0, value_range):
-            key = randint(0, key_range)
-            d.put(key, value)
-            key_set.add(key)
-        
-        sorted_keys = list(sorted(key_set))
-        sorted_keys_slice = sorted_keys[0:len(sorted_keys)//2]
-        
-        for key in sorted_keys_slice:
-            d.delete(key)
-            assert len(d) > 0
-            print(len(d))
-            assert d.depth() <= int(2 * math.log(len(d), 2)), "Should stay as balanced as a red black tree. "
-            assert d.depth() <= int(2 * math.log(len(d), 2)), "Should stay as balanced as a red black tree. "
-            
-        keys = list(d.keys())
-        assert len(keys) == len(sorted_keys_slice), "Length should reflect number of items inserted."
-        assert len(keys) == len(list(keys)), "Iteration should find all items in tree."
-
-    @staticmethod
-    def test_deletion():
-        d = OrderedTreeDict()
-        d.put(0, 0)
-        d.put(-1, -1)
-        d.put(1, 1)
-        assert len(d) == 3, "Length should reflect number of items inserted,"
-        assert 0 in d
-        d.delete(0)
-        assert len(d) == 2
-        assert 0 not in d
-        d.delete(1)
-        assert len(d) == 1
-        assert 1 not in d
 
     @staticmethod
     def test_fuzz_insertions():
@@ -163,6 +120,47 @@ class OrderedTreeDictTest(TestCase):
         assert len(keys) == len(list(keys)), "Iteration should find all items in tree."
         assert d.depth() <= math.ceil(1.44 * math.log2(len(d))), "Should stay as balanced as an avl tree as long as " \
                                                                  "there are only insertions. "
+
+    @staticmethod
+    def test_deletion():
+        d = OrderedTreeDict()
+        d.put(0, 0)
+        d.put(-1, -1)
+        d.put(1, 1)
+        assert len(d) == 3, "Length should reflect number of items inserted,"
+        assert 0 in d
+        d.delete(0)
+        assert len(d) == 2
+        assert 0 not in d
+        d.delete(1)
+        assert len(d) == 1
+        assert 1 not in d
+
+    @staticmethod
+    def test_fuzz_deletions():
+        """A test that inserts random keys into the tree and checks that they were all inserted."""
+        key_range = 2 ** 64
+        value_range = 1024
+        key_set = set()
+    
+        d = OrderedTreeDict()
+        for value in range(0, value_range):
+            key = randint(0, key_range)
+            d.put(key, value)
+            key_set.add(key)
+    
+        sorted_keys = list(sorted(key_set))
+        sorted_keys_slice = sorted_keys[0:len(sorted_keys) // 2]
+    
+        for key in sorted_keys_slice:
+            d.delete(key)
+            assert len(d) > 0
+            assert key not in d
+            assert d.depth() <= int(2 * math.log(len(d), 2)), "Should stay as balanced as a red black tree. "
+    
+        keys = list(d.keys())
+        assert len(keys) == len(sorted_keys_slice), "Length should reflect number of items inserted."
+        assert len(keys) == len(list(keys)), "Iteration should find all items in tree."
 
     @staticmethod
     def test_successor():

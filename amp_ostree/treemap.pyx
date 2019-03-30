@@ -2,8 +2,6 @@
 #cython: language_level=3
 from cpython.weakref cimport PyWeakref_CheckRef, PyWeakref_NewRef, PyWeakref_GetObject
 cimport cython
-from amp_ostree.memstack cimport MemStack
-from libc.math cimport log2
 
 cdef inline size_t size_t_max(size_t a, size_t b) nogil:
     return a if (a >= b) else b
@@ -30,7 +28,7 @@ cdef class _SBTDictNode:
 @cython.final
 cdef class OrderedTreeDict:
     """ A dict based on an ordered statistic SBT tree."""
-    cdef readonly _SBTDictNode root
+    cdef _SBTDictNode root
     cdef object __weakref__
 
     def __cinit__(OrderedTreeDict self, object iterable=None, **kwargs):
@@ -172,16 +170,10 @@ cdef class OrderedTreeDict:
         cdef size_t depth_factor, pushes_per_row, min_depth
         cdef size_t t_left_size, t_left_left_size, t_left_right_size
         cdef size_t t_right_size, t_right_right_size, t_right_left_size
-        cdef MemStack maintain_stack
+        cdef list maintain_stack = [t, ]
         
-        depth_factor = 2
-        pushes_per_row = 3
-        min_depth = <size_t>(log2(<double>t.size) + 1.0)
-        maintain_stack = MemStack(size=(pushes_per_row*depth_factor*min_depth)+1)
-        maintain_stack.c_push(t)
-        
-        while maintain_stack.num_items > 0:
-            t = maintain_stack.c_pop()
+        while maintain_stack:
+            t = maintain_stack.pop()
             if t is None:
                 continue
             
@@ -208,32 +200,30 @@ cdef class OrderedTreeDict:
             # perform fixup rotations
             if t_left_left_size > t_right_size:
                 self._rotate_right(t)
-                maintain_stack.c_push(t)
-                maintain_stack.c_push(t.right)
+                maintain_stack.append(t)
+                maintain_stack.append(t.right)
                 continue
             elif t_left_right_size > t_right_size:
                 if (t.left is not None) and (t.left.right is not None):
                     self._rotate_left(t.left)
                 self._rotate_right(t)
-                maintain_stack.c_push(t)
-                maintain_stack.c_push(t.right)
-                maintain_stack.c_push(t.left)
+                maintain_stack.append(t)
+                maintain_stack.append(t.right)
+                maintain_stack.append(t.left)
                 continue
             elif t_right_right_size > t_left_size:
                 self._rotate_left(t)
-                maintain_stack.c_push(t)
-                maintain_stack.c_push(t.left)
+                maintain_stack.append(t)
+                maintain_stack.append(t.left)
                 continue
             elif t_right_left_size > t_left_size:
                 if (t.right is not None) and (t.right.left is not None):
                     self._rotate_right(t.right)
                 self._rotate_left(t)
-                maintain_stack.c_push(t)
-                maintain_stack.c_push(t.right)
-                maintain_stack.c_push(t.left)
+                maintain_stack.append(t)
+                maintain_stack.append(t.right)
+                maintain_stack.append(t.left)
                 continue
-            else:
-                break
     
     @cython.nonecheck(False)
     cdef inline _insert(OrderedTreeDict self, object key, object value, bint replace=True):
@@ -306,7 +296,6 @@ cdef class OrderedTreeDict:
 
     @cython.nonecheck(False)
     cdef inline _delete(OrderedTreeDict self, _SBTDictNode node):
-        # need to update parent ptrs
         if node is None:
             return None
         
@@ -393,25 +382,12 @@ cdef class OrderedTreeDict:
 
     def items(OrderedTreeDict self):
         """ Returns an iterator over (key, value) pairs."""
-        cdef _SBTDictNode node = self.root
-        cdef MemStack stack
-        if node is None:
+        if self.root is None:
             return
-        try:
-            # max tree depth for an sbt is 2*log(n)
-            stack = MemStack(2*<size_t>(log2(node.size))+1)
-        except MemoryError:
-            raise MemoryError("Not enough memory to iterate a tree this deep.")
+        cdef _SBTDictNode node = OrderedTreeDict._minimum(self.root)
         while node is not None:
-            stack.c_push(node)
-            node = node.left
-        while stack.num_items > 0:
-            node = stack.c_pop()
-            yield (node.key, node.value)
-            node = node.right
-            while node is not None:
-                stack.c_push(node)
-                node = node.left
+            yield node.key, node.value
+            node = OrderedTreeDict._successor(node)
 
     def keys(OrderedTreeDict self):
         """Returns an iterator over the dict keys."""
@@ -579,25 +555,12 @@ cdef class OrderedTreeDict:
         return self.items()
 
     def __reversed__(OrderedTreeDict self):
-       cdef _SBTDictNode node = self.root
-       cdef MemStack stack
-       if node is None:
-           return
-       try:
-           # depth bound is 2*log2(n)
-           stack = MemStack(2*<size_t>(log2(node.size))+1)
-       except MemoryError:
-           raise MemoryError("Not enough memory to iterate a tree this deep.")
-       while node is not None:
-           stack.c_push(node)
-           node = node.right
-       while stack.num_items > 0:
-           node = stack.c_pop()
-           yield (node.key, node.value)
-           node = node.left
-           while node is not None:
-               stack.c_push(node)
-               node = node.right
+        if self.root is None:
+            return
+        cdef _SBTDictNode node = OrderedTreeDict._maximum(self.root)
+        while node is not None:
+            yield node.key, node.value
+            node = OrderedTreeDict._predecessor(node)
  
     def __len__(OrderedTreeDict self):
         if self.root is None:
