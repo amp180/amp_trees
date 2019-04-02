@@ -1,10 +1,15 @@
 #!python
 #cython: language_level=3
 from cpython.weakref cimport PyWeakref_CheckRef, PyWeakref_NewRef, PyWeakref_GetObject
+from cpython.ref cimport PyObject, Py_DECREF, Py_DECREF
+from cpython.pythread cimport PyThread_type_lock, PyThread_allocate_lock, PyThread_free_lock, \
+    PyThread_acquire_lock, PyThread_release_lock, WAIT_LOCK
 cimport cython
+
 
 cdef inline size_t size_t_max(size_t a, size_t b) nogil:
     return a if (a >= b) else b
+
 
 #@cython.trashcan(True)
 @cython.no_gc_clear
@@ -23,6 +28,7 @@ cdef class _SBTDictNode:
     def __repr__(self):
         return f"<_Node object at id(self): "\
             f"(key: {self.key}, value: {self.value}, size: {self.size})"
+
 
 @cython.no_gc_clear
 @cython.final
@@ -360,7 +366,7 @@ cdef class OrderedTreeDict:
     
     def copy(OrderedTreeDict self):
         """ Shallow copy. """
-        return OrderedTreeDict(self)
+        return OrderedTreeDict(self.items())
 
     @staticmethod
     def fromkeys(object keys, object value=None) -> OrderedTreeDict:

@@ -2,7 +2,7 @@
 #cython: language_level=3
 from cpython.weakref cimport PyWeakref_CheckRef, PyWeakref_NewRef, PyWeakref_GetObject
 cimport cython
-from amp_ostree.memstack cimport MemStack
+from amp_trees.memstack cimport MemStack
 from libc.math cimport log2
 
 cdef inline size_t size_t_max(size_t a, size_t b) nogil:

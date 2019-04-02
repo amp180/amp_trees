@@ -1,5 +1,5 @@
 from unittest import TestCase, main
-from amp_ostree.treemap import OrderedTreeDict
+from amp_trees import OrderedTreeDict
 from random import randint
 import timeit
 import math
@@ -250,7 +250,7 @@ class OrderedTreeDictTest(TestCase):
         )
         tree_time = timeit.timeit(
             "keys_tree.min()",
-            setup="from amp_ostree import OrderedTreeDict;"
+            setup="from amp_trees import OrderedTreeDict;"
                   "keys_tree = OrderedTreeDict((key, key) for key in range(-1000, 1000))",
             number=1000
         )
@@ -272,7 +272,7 @@ class OrderedTreeDictTest(TestCase):
         )
         tree_time = timeit.timeit(
             "keys_tree.max()",
-            setup="from amp_ostree import OrderedTreeDict;"
+            setup="from amp_trees import OrderedTreeDict;"
                   "keys_tree = OrderedTreeDict((key, key) for key in range(1000, -1000, -1))",
             number=1000
         )

@@ -11,7 +11,9 @@ build/
 *.so
 **/*.so
 .tox/
-amp_ostree/*.html
+amp_trees/*.html
+cython_debug/
+*.save
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
