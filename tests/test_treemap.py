@@ -37,7 +37,7 @@ class OrderedTreeDictTest(TestCase):
     @staticmethod
     def test_insertion_left_right():
         d = OrderedTreeDict()
-        d.put(0,0)
+        d.put(0, 0)
         d.put(-2, -2)
         d.put(-1, -1)
         assert len(d) == 3, "Length should reflect number of items inserted,"

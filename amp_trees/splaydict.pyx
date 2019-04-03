@@ -1,9 +1,8 @@
 #!python
 #cython: language_level=3
-from cpython.weakref cimport PyWeakref_CheckRef, PyWeakref_NewRef, PyWeakref_GetObject
-from cpython.ref cimport PyObject, Py_DECREF, Py_DECREF
-from cpython.pythread cimport PyThread_type_lock, PyThread_allocate_lock, PyThread_free_lock, \
-    PyThread_acquire_lock, PyThread_release_lock, WAIT_LOCK
+from cpython.mem cimport PyMem_Malloc, PyMem_Free, PyMem_Realloc
+from cpython.ref cimport PyObject, Py_INCREF, Py_DECREF
+from libc.errno cimport ENOMEM, errno
 cimport cython
 
 
@@ -11,14 +10,12 @@ cdef inline size_t size_t_max(size_t a, size_t b) nogil:
     return a if (a >= b) else b
 
 
-@cython.internal
-@cython.final
 cdef struct splaynode_t:
         splaynode_t *left
         splaynode_t *right
         splaynode_t *parent
-        object key
-        object value
+        PyObject *key
+        PyObject *value
 
 
 @cython.internal
@@ -27,176 +24,232 @@ cdef struct splaynode_t:
 cdef class SplayNodeManager:
     cdef:
         size_t nodes_occupied
-        size_t storage_size
+        size_t storage_length
         splaynode_t *storage
-
-    def __cinit__(SplayNodeManager self, size=64)
-        self.storage_size = size
-        self.storage = Py_MALLOC(64*sizeof(splaynode_t))
+        size_t min_size
+        
+    def __cinit__(SplayNodeManager self, size_t size=64):
+        self.storage_length = 0
+        self.nodes_occupied = 0
+        self.min_size = size
+        self.storage = NULL
+        self._realloc_storage(size)
 
     def __dealloc__(SplayNodeManager self):
+        cdef splaynode_t *max_ptr
         if self.nodes_occupied>0:
-            cdef max_ptr = &self.storage[self.nodes_occupied]
+            max_ptr = &self.storage[self.nodes_occupied]
             while max_ptr >= self.storage:
-                Py_DECREF(max_ptr[0].key)
-                Py_DECREF(max_ptr[0].value)
+                Py_DECREF(<object> max_ptr[0].key)
+                Py_DECREF(<object> max_ptr[0].value)
                 max_ptr -= 1
-        Py_FREE(self.storage)
+        PyMem_Free(self.storage)
 
-    cdef alloc_node(SplayNodeManager self):
-        if nodes_occupied < storage_size:
+    cdef inline _realloc_storage(SplayNodeManager self, size_t length):
+        cdef splaynode_t *new_storage
+        if length < self.nodes_occupied:
+            raise ValueError("New size cannot contain all nodes.")
+        errno = 0
+        new_storage = <splaynode_t *>PyMem_Realloc(self.storage, length * sizeof(splaynode_t))
+        if errno != ENOMEM:
+            self.storage = new_storage
+            self.storage_length = length
         else:
-            Py_REALLOC()
+            raise MemoryError("Could not allocate memory for tree.")
 
-    cdef dealloc_node(SplayNodeManager self):
-        pass
+    cdef splaynode_t *alloc_node(SplayNodeManager self):
+        cdef splaynode_t *node
+        if not self.nodes_occupied < self.storage_length:
+            self._realloc_storage(self.storage_length * 2)
+        node = &self.storage[self.nodes_occupied]
+        self.nodes_occupied += 1
+        node[0].left = NULL
+        node[0].right = NULL
+        node[0].parent = NULL
+        node[0].key = NULL
+        node[0].value = NULL
+        return node
 
+    cdef dealloc_node(SplayNodeManager self, splaynode_t *node):
+        cdef splaynode_t *last_node
+        if node is not &self.storage[self.nodes_occupied - 1]:
+            # mode the last node to this node so the last node can be freed.
+            last_node = &self.storage[self.nodes_occupied - 1]
+            node[0].left = last_node[0].left
+            node[0].right = last_node[0].right
+            node[0].parent = last_node[0].parent
+            node[0].key = last_node[0].key
+            node[0].value = last_node[0].value
+            # Fix parent and child pointers
+            if node is node[0].parent[0].left:
+                node[0].parent[0].left = node
+            else:
+                node[0].parent[0].right = node
+            if node[0].left is not NULL:
+                node[0].left[0].parent = node
+            if node[0].right is not NULL:
+                node[0].right[0].parent = node
+        # Decrement the number of used nodes
+        self.nodes_occupied -= 1
+        # Reduce mem size if only half full
+        if (self.nodes_occupied < self.storage_length // 2) and (self.storage_length // 2 > self.min_size):
+            self._realloc_storage(self.storage_length // 2)
+                
 
-#@cython.no_gc_clear
-#@cython.final
-#cdef class SplayDict:
-#    """ A dict based on an ordered statistic SBT tree."""
-#    cdef size_t storage_size
-#    cdef size_t storage_occupied
-#    cdef splaynode_t *storage
-#    cdef splaynode_t *root
-#    cdef object __weakref__
-#
-#    def __cinit__(OrderedTreeDict self, object iterable=None, **kwargs):
-#        
-#    @cython.nonecheck(False)
-#    cpdef inline _rotate_right(OrderedTreeDict self, _SBTDictNode t):
-#        if t is None:
-#            return
-#        assert t.left is not None, "cannot rotate right"
-#        # k <- left[t]
-#        cdef _SBTDictNode k = t.left
-#        cdef _SBTDictNode parent = OrderedTreeDict._get_parent(t)
-#        cdef size_t left_size, right_size
-#        # left[t] <- right[k]
-#        t.left = k.right
-#        if t.left is not None:
-#            t.left.parent_ref = OrderedTreeDict._make_ref(t)
-#        # right[k] <- t
-#        k.right = t
-#        if k.right is not None:
-#            k.right.parent_ref = OrderedTreeDict._make_ref(k)
-#        # s[k] <= s[t]
-#        k.size = t.size
-#        # s[t] <- s[left[t]] + s[right[t]] + 1
-#        left_size = OrderedTreeDict._node_left_size(t)
-#        right_size = OrderedTreeDict._node_right_size(t)
-#        t.size = left_size + right_size + 1
-#        # t = k
-#        if parent is None:
-#            self.root = k
-#            k.parent_ref = None
-#        else:
-#            k.parent_ref = OrderedTreeDict._make_ref(parent)
-#            if t is parent.left:
-#                parent.left = k
-#            elif t is parent.right:
-#                parent.right = k
-#            else:
-#                assert False, "Node is not child of parent"
-#
-#    @cython.nonecheck(False)
-#    cpdef inline _rotate_left(OrderedTreeDict self, _SBTDictNode t):
-#        if t is None:
-#            return
-#        assert t.right is not None, "cannot rotate left"
-#        # k <- right[t]
-#        cdef _SBTDictNode k = t.right
-#        cdef _SBTDictNode parent = OrderedTreeDict._get_parent(t)
-#        cdef size_t left_size, right_size
-#        # right[t] <- left[k]
-#        t.right = k.left
-#        if t.right is not None:
-#            t.right.parent_ref = OrderedTreeDict._make_ref(t)
-#        # left[k] <- t
-#        k.left = t
-#        if k.left is not None:
-#            k.left.parent_ref = OrderedTreeDict._make_ref(k)
-#        # s[k] <- s[t]
-#        k.size = t.size
-#        # s[t] <- s[left[t]] + s[right[t]] + 1
-#        left_size = OrderedTreeDict._node_left_size(t)
-#        right_size = OrderedTreeDict._node_right_size(t)
-#        t.size = left_size + right_size + 1
-#        # t <- k
-#        if parent is None:
-#            # nothing in tree
-#            self.root = k
-#            k.parent_ref = None
-#        else:
-#            k.parent_ref = OrderedTreeDict._make_ref(parent)
-#            if t is parent.left:
-#                parent.left = k
-#            elif t is parent.right:
-#                parent.right = k
-#            else:
-#                assert False, "Node is not child of parent"
-#    
-#    @cython.nonecheck(False)
-#    cdef inline _maintain(OrderedTreeDict self, _SBTDictNode t):
-#        cdef size_t depth_factor, pushes_per_row, min_depth
-#        cdef size_t t_left_size, t_left_left_size, t_left_right_size
-#        cdef size_t t_right_size, t_right_right_size, t_right_left_size
-#        cdef list maintain_stack = [t, ]
-#        
-#        while maintain_stack:
-#            t = maintain_stack.pop()
-#            if t is None:
-#                continue
-#            
-#            # calculate subtree sizes
-#            t_left_size = 0
-#            t_left_left_size = 0
-#            t_left_right_size = 0
-#            t_right_size = 0
-#            t_right_right_size = 0
-#            t_right_left_size = 0
-#            if t.left is not None:
-#                t_left_size = t.left.size
-#                if t.left.left is not None:
-#                    t_left_left_size = t.left.left.size
-#                if t.left.right is not None:
-#                    t_left_right_size = t.left.right.size
-#            if t.right is not None:
-#                t_right_size = t.right.size
-#                if t.right.right is not None:
-#                    t_right_right_size = t.right.right.size
-#                if t.right.left is not None:
-#                    t_right_left_size = t.right.left.size
-#            
-#            # perform fixup rotations
-#            if t_left_left_size > t_right_size:
-#                self._rotate_right(t)
-#                maintain_stack.append(t)
-#                maintain_stack.append(t.right)
-#                continue
-#            elif t_left_right_size > t_right_size:
-#                if (t.left is not None) and (t.left.right is not None):
-#                    self._rotate_left(t.left)
-#                self._rotate_right(t)
-#                maintain_stack.append(t)
-#                maintain_stack.append(t.right)
-#                maintain_stack.append(t.left)
-#                continue
-#            elif t_right_right_size > t_left_size:
-#                self._rotate_left(t)
-#                maintain_stack.append(t)
-#                maintain_stack.append(t.left)
-#                continue
-#            elif t_right_left_size > t_left_size:
-#                if (t.right is not None) and (t.right.left is not None):
-#                    self._rotate_right(t.right)
-#                self._rotate_left(t)
-#                maintain_stack.append(t)
-#                maintain_stack.append(t.right)
-#                maintain_stack.append(t.left)
-#                continue
-#    
+@cython.final
+cdef class SplayDict:
+    """ A dict based on an ordered statistic SBT tree."""
+    cdef SplayNodeManager storage
+    cdef splaynode_t *root
+    cdef object __weakref__
+
+    def __cinit__(SplayDict self, object iterable=None):
+        cdef size_t size
+        if iterable is not None:
+            # Preallocate if possible
+            if iterable.getattr('__len__') is not None:
+                size = iterable.__len__()
+                self.storage = SplayNodeManager(size=size)
+            else:
+                self.storage = SplayNodeManager()
+            # insert items
+            self.update(iterable)
+        else:
+            self.storage = SplayNodeManager()
+    
+    @cython.nonecheck(False)
+    cdef inline _rotate_right(SplayDict self, splaynode_t *t):
+        if t is NULL:
+            return
+        assert t[0].left is not NULL, "cannot rotate right"
+        # k <- left[t]
+        cdef splaynode_t *k = t[0].left
+        cdef splaynode_t *parent = t[0].parent
+        cdef size_t left_size, right_size
+        # left[t] <- right[k]
+        t[0].left = k[0].right
+        if t[0].left is not NULL:
+            t[0].left[0].parent = t
+        # right[k] <- t
+        k[0].right = t
+        if k[0].right is not NULL:
+            k[0].right[0].parent = k
+        # t = k
+        if parent is NULL:
+            self.root = k
+            k[0].parent = NULL
+        else:
+            k[0].parent = parent
+            if t is parent[0].left:
+                parent[0].left = k
+            elif t is parent[0].right:
+                parent[0].right = k
+            else:
+                assert False, "Node is not child of parent"
+
+    cdef inline _splay(SplayDict self, splaynode_t *node):
+        if node is NULL or self.root:
+            return
+        while node is not self.root:
+            self._splay_step(node)
+
+    cdef inline _splay_step(SplayDict self, splaynode_t *node):
+        cdef splaynode_t *parent
+        cdef splaynode_t *grandparent
+        if node[0].parent is not NULL:
+            parent = node[0].parent
+            if node[0].parent[0].parent is not NULL:
+                grandparent = node[0].parent[0].parent
+                # zig zig step
+                if parent is grandparent[0].left and node is parent[0].left:
+                    self._rotate_right(parent)
+                    self._rotate_right(grandparent)
+                elif parent is grandparent[0].right and node is parent[0].right:
+                    self._rotate_left(parent)
+                    self._rotate_left(grandparent)
+                # zig zag step
+                elif parent is grandparent[0].left and node is parent[0].right:
+                    self._rotate_left(parent)
+                    self._rotate_right(grandparent)
+                elif parent is grandparent[0].right and node is parent[0].left:
+                    self._rotate_right(parent)
+                    self._rotate_left(grandparent)
+            else:
+                if node is parent[0].left:
+                    self._rotate_right(parent)
+                else: # node is parent[0].right
+                    self._rotate_left(parent)
+        return
+            
+    
+    @cython.nonecheck(False)
+    cdef inline _rotate_left(SplayDict self, splaynode_t *t):
+        if t is NULL:
+            return
+        assert t[0].right is not NULL, "cannot rotate left"
+        # k <- right[t]
+        cdef splaynode_t *k = t.right
+        cdef splaynode_t *parent = t[0].parent
+        cdef size_t left_size, right_size
+        # right[t] <- left[k]
+        t[0].right = k[0].left
+        if t[0].right is not NULL:
+            t[0].right[0].parent = t
+        # left[k] <- t
+        k[0].left = t
+        if k[0].left is not NULL:
+            k[0].left[0].parent = k
+        # t <- k
+        if parent is NULL:
+            # nothing in tree
+            self.root = k
+            k[0].parent = NULL
+        else:
+            k[0].parent = parent
+            if t is parent[0].left:
+                parent[0].left = k
+            elif t is parent[0].right:
+                parent[0].right = k
+            else:
+                assert False, "Node is not child of parent"
+
+    def insert(SplayDict self, object key, object value):
+        cdef splaynode_t *new_node = NULL
+        cdef splaynode_t *insertion_node = NULL
+        cdef splaynode_t *next_node = self.root
+        
+        if self.root is NULL:
+            self.root = self.storage.alloc_node()
+            Py_INCREF(key)
+            Py_INCREF(value)
+            self.root[0].key = <PyObject *> key
+            self.root[0].value = <PyObject *> value
+            return
+        
+        while next_node is not NULL:
+            insertion_node = next_node
+            if key < (<object> insertion_node[0].key):
+                next_node = insertion_node[0].left
+            elif key > (<object> insertion_node[0].key):
+                next_node = insertion_node[0].right
+            else: # key == insertion node key
+                break
+                
+        # splay
+        
+        if next_node is not NULL:
+            # key == insertion node key
+            # insert into existing node
+            Py_DECREF(<object> next_node[0].value)
+            Py_INCREF(value)
+            next_node[0].value = <PyObject *>value
+        
+        
+
+    def clear(SplayDict self):
+        self.storage = SplayNodeManager()
+        self.root = NULL
+        
 #    @cython.nonecheck(False)
 #    cdef inline _insert(OrderedTreeDict self, object key, object value, bint replace=True):
 #        cdef _SBTDictNode insertion_node, next_node, new_node, parent_node, prev_parent_node

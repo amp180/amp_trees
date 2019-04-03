@@ -25,12 +25,14 @@ else:
 
 
 # Build from .pyx files if cython is installed, otherwise assume installing from sdist and c files exist.
-ext = '.pyx' if USING_CYTHON else '.c'
-treeset = Extension("amp_trees.treeset", ["amp_trees/treeset"+ext])
-treemap = Extension("amp_trees.treemap", ["amp_trees/treemap"+ext])
-memstack = Extension("amp_trees.memstack", ["amp_trees/memstack"+ext])
+cy_ext = '.pyx' if USING_CYTHON else '.c'
+py_ext = '.py' if USING_CYTHON else '.c'
+init = Extension("amp_trees.__init__", ["amp_trees/__init__"+py_ext])
+treedict = Extension("amp_trees.treedict", ["amp_trees/treedict"+cy_ext])
+splaydict = Extension("amp_trees.splaydict", ["amp_trees/splaydict"+cy_ext])
+memstack = Extension("amp_trees.memstack", ["amp_trees/memstack"+cy_ext])
 
-modules = [treeset, treemap, memstack]
+modules = [init, treedict, splaydict, memstack]
 
 # generate .c files
 if USING_CYTHON:
@@ -42,8 +44,8 @@ setup(
     ext_modules=modules,
     packages=find_packages(),
     package_data={'amp_trees': glob.glob("amp_trees/*.((pyx)|(.pxd)|(c))"),}, # Include pyx and c files in sdist
-    include_package_data=True, # Don't install the pyx files with the bdist.
+    include_package_data=True,  # Don't install the pyx files with the bdist.
     version=__version__,
-    cmdclass = {'build_ext': build_ext} if USING_CYTHON else {}
-
+    cmdclass={'build_ext': build_ext} if USING_CYTHON else {},
+    install_requires=["typing_extensions",]
 )
