@@ -2,6 +2,7 @@
 #cython: language_level=3
 from cpython.mem cimport PyMem_Malloc, PyMem_Free, PyMem_Realloc
 from cpython.ref cimport PyObject, Py_INCREF, Py_DECREF
+from cpython.exc cimport PyErr_CheckSignals
 from libc.errno cimport ENOMEM, errno
 cimport cython
 
@@ -19,7 +20,6 @@ cdef struct splaynode_t:
 
 
 @cython.internal
-@cython.no_gc_clear
 @cython.final
 cdef class SplayNodeManager:
     cdef:
@@ -38,12 +38,20 @@ cdef class SplayNodeManager:
     def __dealloc__(SplayNodeManager self):
         cdef splaynode_t *max_ptr
         if self.nodes_occupied>0:
-            max_ptr = &self.storage[self.nodes_occupied]
+            max_ptr = &self.storage[self.nodes_occupied-1]
             while max_ptr >= self.storage:
                 Py_DECREF(<object> max_ptr[0].key)
                 Py_DECREF(<object> max_ptr[0].value)
                 max_ptr -= 1
         PyMem_Free(self.storage)
+        
+    def __iter__(SplayNodeManager self):
+        cdef splaynode_t *max_ptr
+        if self.nodes_occupied>0:
+            max_ptr = &self.storage[self.nodes_occupied-1]
+            while max_ptr >= self.storage:
+                yield (<object> max_ptr[0].key, <object> max_ptr[0].value)
+                max_ptr -= 1
 
     cdef inline _realloc_storage(SplayNodeManager self, size_t length):
         cdef splaynode_t *new_storage
@@ -106,11 +114,14 @@ cdef class SplayDict:
         cdef size_t size
         if iterable is not None:
             # Preallocate if possible
-            if iterable.getattr('__len__') is not None:
-                size = iterable.__len__()
-                self.storage = SplayNodeManager(size=size)
-            else:
+            try:
+                len(iterable)
+            except:
                 self.storage = SplayNodeManager()
+            else:
+                size = len(iterable)
+                self.storage = SplayNodeManager(size=size)
+
             # insert items
             self.update(iterable)
         else:
@@ -223,6 +234,18 @@ cdef class SplayDict:
             curr_node = next_node
             next_node = next_node[0].left
         return curr_node
+    
+    @staticmethod
+    @cython.nonecheck(False)
+    cdef inline splaynode_t* _maximum(splaynode_t *node):
+        if node is NULL:
+            raise KeyError("Dictionary is empty.")
+        cdef splaynode_t *curr_node = NULL
+        cdef splaynode_t *next_node = node
+        while next_node is not NULL:
+            curr_node = next_node
+            next_node = next_node.right
+        return curr_node
 
     cdef inline splaynode_t* _get_node(SplayDict self, object key):
         cdef splaynode_t *current_node = NULL;
@@ -230,9 +253,9 @@ cdef class SplayDict:
 
         while next_node is not NULL:
             current_node = next_node
-            if(<object>(current_node[0].key) < key):
+            if <object> current_node[0].key < key:
                 next_node = current_node[0].left
-            elif (<object>(current_node[0].key) > key ):
+            elif <object> current_node[0].key > key:
                 next_node = current_node[0].right
             else:
                 self._splay(current_node)
@@ -279,7 +302,7 @@ cdef class SplayDict:
         new_node[0].value = <PyObject *> value
         new_node[0].parent = insertion_node
 
-        if(<object>(insertion_node[0].key) > key):
+        if <object> insertion_node[0].key > key:
             insertion_node[0].left = new_node
         else:
             insertion_node[0].right = new_node
@@ -302,188 +325,172 @@ cdef class SplayDict:
             node = parent
             parent = node[0].parent
         return parent
+    
+    @staticmethod
+    @cython.nonecheck(False)
+    cdef inline splaynode_t* _predecessor(splaynode_t* node):
+        cdef splaynode_t* parent = node[0].parent
+        if node.left is not NULL:
+            return SplayDict._maximum(node.left)
+        while (parent is not NULL) and (node is parent.left):
+            node = parent
+            parent = parent[0].parent
+        return parent
+    
+    @cython.nonecheck(False)
+    cdef inline _delete(SplayDict self, splaynode_t *node):
+        if node is NULL:
+            return None
 
+        cdef splaynode_t *successor
+        cdef splaynode_t *parent = node[0].parent
+
+        # If node is leaf, delete node.
+        if (node[0].left is NULL) and (node[0].right is NULL):
+            if parent is NULL:
+                self.root = NULL
+            elif node is parent[0].left:
+                parent[0].left = NULL
+            elif node is parent[0].right:
+                parent[0].right = NULL
+            self.storage.dealloc_node(node)
+            self._splay(parent)
+        # if node has one child, replace the node with it's child
+        elif (node[0].left is NULL) ^ (node[0].right is NULL):
+            if parent is NULL:
+                if node[0].left is not NULL:
+                    self.root = node[0].left
+                else:
+                    self.root = node[0].right
+                self.root[0].parent = NULL
+            elif node is parent[0].left:
+                if node[0].left is not NULL:
+                    parent[0].left = node[0].left
+                    node[0].left[0].parent = parent
+                else: # node.right isn't null
+                    parent[0].left = node[0].right
+                    node[0].right[0].parent = parent
+            else: # node is parent.right
+                if node[0].left is not NULL:
+                    parent[0].right = node[0].left
+                    node[0].left[0].parent = parent
+                else: # node.right isn't null
+                    parent[0].right = node.right
+                    node[0].right[0].parent = parent
+            self.storage.dealloc_node(node)
+            self._splay(parent)
+        # if node has two children, find it's successor and delete it recursively, copying it's key/value to this node.
+        # if the node has a right child, it's inorder successor is the minimum of the right children.
+        successor = SplayDict._successor(node)
+        node.key, node.value = successor.key, successor.value
+        self._delete(successor)
+        if parent is not NULL:
+            self._splay(parent)
+
+    def items(SplayDict self):
+       cdef splaynode_t *node = SplayDict._minimum(self.root)
+       while node is not NULL:
+           yield (<object>(node[0].key), <object>(node[0].value))
+           node = SplayDict._successor(node)
+           
+    def keys(SplayDict self):
+       cdef splaynode_t *node = SplayDict._minimum(self.root)
+       while node is not NULL:
+           yield <object>(node[0].key)
+           node = SplayDict._successor(node)
+
+    def values(SplayDict self):
+       cdef splaynode_t *node = SplayDict._minimum(self.root)
+       while node is not NULL:
+           yield <object>(node[0].value)
+           node = SplayDict._successor(node)
+
+    def iter_fast(SplayDict self):
+       return self.storage
+       
     def __iter__(SplayDict self):
        cdef splaynode_t *node = SplayDict._minimum(self.root)
        while node is not NULL:
            yield (<object>(node[0].key), <object>(node[0].value))
            node = SplayDict._successor(node)
+           
+    def delete(SplayDict self, object key):
+        cdef splaynode_t *node = self._get_node(key)
+        self._delete(node)
 
-#    @cython.nonecheck(False)
-#    cdef inline _delete(SplayDict self, splaydictnode_t *node):
-#        if node is NULL:
-#            return None
-#
-#        cdef splaynode_t *successor
-#        cdef splaynode_t *parent = node[0].parent
-#
-#        # If node is leaf, delete node.
-#        if (node[0].left is NULL) and (node[0].right is NULL):
-#            if parent is NULL:
-#                self.root = NULL
-#            elif node is parent[0].left:
-#                parent[0].left = NULL
-#            elif node is parent[0].right:
-#                parent[0].right = NULL
-#            self._splay(parent)
-#            return node
-#        # if node has one child, replace the node with it's child
-#        elif (node[0].left is NULL) ^ (node[0].right is NULL):
-#            if parent is NULL:
-#                if node[0].left is not NULL:
-#                    self.root = node[0].left
-#                else:
-#                    self.root = node[0].right
-#                node.parent_ref = None
-#            elif node is parent[0].left:
-#                if node[0].left is not NULL:
-#                    parent[0].left = node[0].left
-#                    node[0].left[0].parent = parent
-#                else: # node.right isn't null
-#                    parent[0].left = node[0].right
-#                    node[0].right[0].parent = parent
-#            else: # node is parent.right
-#                if node[0].left is not NULL:
-#                    parent[0].right = node[0].left
-#                    node[0].left[0].parent = parent
-#                else: # node.right isn't null
-#                    parent[0].right = node.right
-#                    node[0].right[0].parent = parent
-#            self._splay(parent)
-#            return node
-#        # if node has two children, find it's successor and delete it recursively, copying it's key/value to this node.
-#        # if the node has a right child, it's inorder successor is the minimum of the right children.
-#        successor = self._successor(node)
-#        node.key, node.value = successor.key, successor.value
-#        self._delete(successor)
-#        if parent is not NULL:
-#            self._splay(parent)
-#        return node
+    cpdef update(SplayDict self, object items):
+        cdef object key, value
+        cdef size_t ctr = 0
+        for key, value in items:
+            self._insert(key, value)
+            if ctr % 100000 == 0:
+                # catch KeyboardInterrupt
+                PyErr_CheckSignals()
+            ctr += 1
 
-#    def delete(SplayDict self, object key):
-#        cdef splaynode_t *node = self._get_node(key)
-#        self._delete(node)
-#
-#    cpdef update(SplayDict self, object items):
-#        cdef object key, value
-#        for key, value in items:
-#            self._insert(key, value)
-#
-#    def ordered_iter(SplayDict self):
-#        cdef splaynode_t *node = self._minimum(self.root)
-#        while node is not NULL:
-#            yield node
-#            node = SplayDict._successor(node)
+    def copy(SplayDict self):
+        """ Shallow copy. """
+        return SplayDict(iter(self))
 
-#    def copy(OrderedTreeDict self):
-#        """ Shallow copy. """
-#        return OrderedTreeDic
-
-#    @staticmethod
-#    def fromkeys(object keys, object value=None) -> OrderedTreeDict:
-#        """The fromkeys() method creates a new dictionary from the given sequence of elements with a value provided by the user. """
-#        cdef object key
-#        cdef OrderedTreeDict new_dict = OrderedTreeDict()
-#        for key in keys:
-#             new_dict.put(key, value)
-#        return new_dict
-#    
-#    def popitem(OrderedTreeDict self):
+    @staticmethod
+    def fromkeys(object keys, object value=None) -> SplayDict:
+        """The fromkeys() method creates a new dictionary from the given sequence of elements with a value provided by the user. """
+        cdef object key
+        cdef size_t ctr = 0
+        cdef SplayDict new_dict = SplayDict()
+        for key in keys:
+             new_dict.put(key, value)
+             if ctr % 100000 == 0:
+                # catch KeyboardInterrupt
+                PyErr_CheckSignals()
+             ctr += 1
+        return new_dict
+    
+    def __len__(SplayDict self):
+        if self.root is NULL:
+            return 0
+        return self.storage.nodes_occupied
+    
+#    def popitem(SplayDict self):
 #        """ The popitem() returns and removes an element (key, value) pair from the dictionary.
 #        """
 #        if self.root is None:
 #            raise KeyError()
-#        cdef _SBTDictNode node = self.root
+#        cdef splaynode_t* node = self.root
 #        self._delete(node)
 #        return node.key, node.value
 #
-#    def items(OrderedTreeDict self):
-#        """ Returns an iterator over (key, value) pairs."""
-#        if self.root is None:
-#            return
-#        cdef _SBTDictNode node = OrderedTreeDict._minimum(self.root)
-#        while node is not None:
-#            yield node.key, node.value
-#            node = OrderedTreeDict._successor(node)
-#
-#    def keys(OrderedTreeDict self):
-#        """Returns an iterator over the dict keys."""
-#        cdef object key, value
-#        for key, value in self.items():
-#            yield key
-#    
-#    def values(OrderedTreeDict self):
-#        """ Returns an iterator over the dict values."""
-#        cdef object key, value
-#        for key, value in self.items():
-#            yield value
-#
-#    def setdefault(OrderedTreeDict self, object key, object value):
+#    def setdefault(SplayDict self, object key, object value):
 #        """Sets a key in the dictionary if it does not already exist."""
 #        self._insert(key, value, replace=False)
 #
-#    def pop(OrderedTreeDict self, object key):
+#    def pop(SplayDict self, object key):
 #        """ Returns and removes the value for key."""
-#        cdef _SBTDictNode node = self._get_node(key)
+#        cdef splaynode_t* node = self._get_node(key)
 #        self._delete(node)
 #        return node.key, node.value
 #
-#    @staticmethod
-#    @cython.nonecheck(False)
-#    cdef inline _SBTDictNode _maximum(_SBTDictNode node):
-#        if node is None:
-#            raise KeyError("Dictionary is empty.")
-#        cdef _SBTDictNode curr_node = None
-#        cdef _SBTDictNode next_node = node
-#        while next_node is not None:
-#            curr_node = next_node
-#            next_node = next_node.right
-#        return curr_node
-#
-#    def max(OrderedTreeDict self):
-#        cdef _SBTDictNode max_node = OrderedTreeDict._maximum(self.root)
+#    def max(SplayDict self):
+#        cdef splaynode_t* max_node = SplayDict._maximum(self.root)
 #        return max_node.key, max_node.value
-#    
-#    @staticmethod
-#    cdef inline _SBTDictNode _minimum(_SBTDictNode node):
-#        if node is None:
-#            raise KeyError("Dictionary is empty.")
-#        cdef _SBTDictNode curr_node = None
-#        cdef _SBTDictNode next_node = node
-#        while next_node is not None:
-#            curr_node = next_node
-#            next_node = next_node.left
-#        return curr_node
 #
-#    def min(OrderedTreeDict self):
-#        cdef _SBTDictNode min_node = OrderedTreeDict._minimum(self.root)
+#    def min(SplayDict self):
+#        cdef splaynode_t* min_node = SplayDict._minimum(self.root)
 #        return min_node.key, min_node.value
-#    
-#    
-#    def successor(OrderedTreeDict self, object key):
-#        cdef _SBTDictNode node = self._get_node(key)
-#        node = OrderedTreeDict._successor(node)
+#
+#    def successor(SplayDict self, object key):
+#        cdef splaynode_t* node = self._get_node(key)
+#        node = SplayDict._successor(node)
 #        if node is not None:
 #            return node.key, node.value
-#        
-#    @staticmethod
-#    @cython.nonecheck(False)
-#    cdef inline _predecessor(_SBTDictNode node):
-#        cdef _SBTDictNode parent = OrderedTreeDict._get_parent(node)
-#        if node.left is not None:
-#            return OrderedTreeDict._maximum(node.left)
-#        while (parent is not None) and (node is parent.left):
-#            node = parent
-#            parent = OrderedTreeDict._get_parent(parent)
-#        return parent
-#    
-#    def predecessor(OrderedTreeDict self, object key):
-#        cdef _SBTDictNode node = self._get_node(key)
-#        node = OrderedTreeDict._predecessor(node)
+#
+#    def predecessor(SplayDict self, object key):
+#        cdef splaynode_t* node = self._get_node(key)
+#        node = SplayDict._predecessor(node)
 #        if node is not None:
 #            return node.key, node.value
 #    
-#    cpdef size_t depth(OrderedTreeDict self):
+#    cpdef size_t depth(SplayDict self):
 #        """ Get the maximum depth of the tree.
 #
 #        Returns:
@@ -493,7 +500,7 @@ cdef class SplayDict:
 #            return 0
 #        node_stack = []
 #        depth_stack = []
-#        cdef _SBTDictNode current_node = self.root
+#        cdef splaynode_t* current_node = self.root
 #        cdef size_t current_depth = 1
 #        cdef size_t max_depth = 0
 #        # Traverse down left branch nodes while pushing right nodes.
@@ -517,33 +524,26 @@ cdef class SplayDict:
 #            ), "Node stack desynced from depth stack."
 #        return max_depth
 #    
-#    def __getitem__(OrderedTreeDict self, object key):
-#        cdef _SBTDictNode node = self._get_node(key)
+#    def __getitem__(SplayDict self, object key):
+#        cdef splaynode_t* node = self._get_node(key)
 #        return node.value
 #    
-#    def __setitem__(OrderedTreeDict self, object key, object value):
+#    def __setitem__(SplayDict self, object key, object value):
 #        self._insert(key, value)
 #        
-#    def __delitem__(OrderedTreeDict self, object key):
-#        cdef _SBTDictNode node = self._get_node(key)
+#    def __delitem__(SplayDict self, object key):
+#        cdef splaynode_t* node = self._get_node(key)
 #        self._delete(node)
 #
-#    def __contains__(OrderedTreeDict self, object key):
+#    def __contains__(SplayDict self, object key):
 #        return self._get_node(key, raise_on_missing=False) is not None
-#    
-#    def __iter__(OrderedTreeDict self):
-#        """ Returns an iterator over (key, value) pairs."""
-#        return self.keys()
 #
-#    def __reversed__(OrderedTreeDict self):
+#    def __reversed__(SplayDict self):
 #        if self.root is None:
 #            return
-#        cdef _SBTDictNode node = OrderedTreeDict._maximum(self.root)
+#        cdef splaynode_t* node = SplayDict._maximum(self.root)
 #        while node is not None:
 #            yield node.key, node.value
-#            node = OrderedTreeDict._predecessor(node)
+#            node = SplayDict._predecessor(node)
 # 
-#    def __len__(OrderedTreeDict self):
-#        if self.root is None:
-#            return 0
-#        return self.root.size
+
