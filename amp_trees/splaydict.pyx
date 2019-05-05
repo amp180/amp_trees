@@ -450,7 +450,21 @@ cdef class SplayDict:
         if self.root is NULL:
             return 0
         return self.storage.nodes_occupied
+
+    def __getitem__(SplayDict self, object key):
+        cdef splaynode_t* node = self._get_node(key)
+        return <object> node[0].value
     
+    def __setitem__(SplayDict self, object key, object value):
+        self._insert(key, value)
+        
+    def __delitem__(SplayDict self, object key):
+        cdef splaynode_t* node = self._get_node(key)
+        self._delete(node)
+
+    def __contains__(SplayDict self, object key):
+        return self._get_node(key) is not NULL
+#
 #    def popitem(SplayDict self):
 #        """ The popitem() returns and removes an element (key, value) pair from the dictionary.
 #        """
@@ -524,20 +538,7 @@ cdef class SplayDict:
 #            ), "Node stack desynced from depth stack."
 #        return max_depth
 #    
-#    def __getitem__(SplayDict self, object key):
-#        cdef splaynode_t* node = self._get_node(key)
-#        return node.value
-#    
-#    def __setitem__(SplayDict self, object key, object value):
-#        self._insert(key, value)
-#        
-#    def __delitem__(SplayDict self, object key):
-#        cdef splaynode_t* node = self._get_node(key)
-#        self._delete(node)
-#
-#    def __contains__(SplayDict self, object key):
-#        return self._get_node(key, raise_on_missing=False) is not None
-#
+
 #    def __reversed__(SplayDict self):
 #        if self.root is None:
 #            return
