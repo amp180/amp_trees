@@ -215,25 +215,24 @@ cdef class SplayDict:
 
     @staticmethod
     cdef inline splaynode_t* _minimum(splaynode_t *node):
-        if node is None:
+        if node is NULL:
             raise KeyError("Dictionary is empty.")
-        cdef splaynode_t *curr_node = None
+        cdef splaynode_t *curr_node = NULL
         cdef splaynode_t *next_node = node
-        while next_node is not None:
+        while next_node is not NULL:
             curr_node = next_node
             next_node = next_node[0].left
         return curr_node
 
-    def _get_node(SplayDict self, object key):
+    cdef inline splaynode_t* _get_node(SplayDict self, object key):
         cdef splaynode_t *current_node = NULL;
         cdef splaynode_t *next_node = self.root;
 
-        while next_node = NULL:
+        while next_node is not NULL:
             current_node = next_node
-            self._splay_step(current_node)
-            if(current_node[0].value < value):
+            if(<object>(current_node[0].key) < key):
                 next_node = current_node[0].left
-            elif (current_node[0].right):
+            elif (<object>(current_node[0].key) > key ):
                 next_node = current_node[0].right
             else:
                 self._splay(current_node)
@@ -276,11 +275,11 @@ cdef class SplayDict:
         new_node = self.storage.alloc_node()
         Py_INCREF(key)
         Py_INCREF(value)
-        new_node[0].key = key
-        new_node[0].value = value
+        new_node[0].key = <PyObject *> key
+        new_node[0].value = <PyObject *> value
         new_node[0].parent = insertion_node
 
-        if(insertion_node[0].key < key):
+        if(<object>(insertion_node[0].key) > key):
             insertion_node[0].left = new_node
         else:
             insertion_node[0].right = new_node
@@ -291,75 +290,90 @@ cdef class SplayDict:
         self.storage = SplayNodeManager()
         self.root = NULL
 
-    cpdef put(OrderedTreeDict self, object key, object value):
+    cpdef put(SplayDict self, object key, object value):
         self._insert(key, value)
 
-    cdef inline _successor(splaynode_t *node):
-        cdef _SBTDictNode parent = node[0].parent
+    @staticmethod
+    cdef inline splaynode_t* _successor(splaynode_t *node):
+        cdef splaynode_t *parent = node[0].parent
         if node[0].right is not NULL:
-            return OrderedTreeDict._minimum(node.right)
+            return SplayDict._minimum(node[0].right)
         while (parent is not NULL) and (node is parent[0].right):
             node = parent
             parent = node[0].parent
         return parent
 
-    @cython.nonecheck(False)
-    cdef inline _delete(SplayDict self, splaydictnode_t *node):
-        if node is NULL:
-            return None
+    def __iter__(SplayDict self):
+       cdef splaynode_t *node = SplayDict._minimum(self.root)
+       while node is not NULL:
+           yield (<object>(node[0].key), <object>(node[0].value))
+           node = SplayDict._successor(node)
 
-        cdef splaynode_t *successor
-        cdef splaynode_t *parent = node[0].parent
+#    @cython.nonecheck(False)
+#    cdef inline _delete(SplayDict self, splaydictnode_t *node):
+#        if node is NULL:
+#            return None
+#
+#        cdef splaynode_t *successor
+#        cdef splaynode_t *parent = node[0].parent
+#
+#        # If node is leaf, delete node.
+#        if (node[0].left is NULL) and (node[0].right is NULL):
+#            if parent is NULL:
+#                self.root = NULL
+#            elif node is parent[0].left:
+#                parent[0].left = NULL
+#            elif node is parent[0].right:
+#                parent[0].right = NULL
+#            self._splay(parent)
+#            return node
+#        # if node has one child, replace the node with it's child
+#        elif (node[0].left is NULL) ^ (node[0].right is NULL):
+#            if parent is NULL:
+#                if node[0].left is not NULL:
+#                    self.root = node[0].left
+#                else:
+#                    self.root = node[0].right
+#                node.parent_ref = None
+#            elif node is parent[0].left:
+#                if node[0].left is not NULL:
+#                    parent[0].left = node[0].left
+#                    node[0].left[0].parent = parent
+#                else: # node.right isn't null
+#                    parent[0].left = node[0].right
+#                    node[0].right[0].parent = parent
+#            else: # node is parent.right
+#                if node[0].left is not NULL:
+#                    parent[0].right = node[0].left
+#                    node[0].left[0].parent = parent
+#                else: # node.right isn't null
+#                    parent[0].right = node.right
+#                    node[0].right[0].parent = parent
+#            self._splay(parent)
+#            return node
+#        # if node has two children, find it's successor and delete it recursively, copying it's key/value to this node.
+#        # if the node has a right child, it's inorder successor is the minimum of the right children.
+#        successor = self._successor(node)
+#        node.key, node.value = successor.key, successor.value
+#        self._delete(successor)
+#        if parent is not NULL:
+#            self._splay(parent)
+#        return node
 
-        # If node is leaf, delete node.
-        if (node.left is None) and (node.right is None):
-            if parent is None:
-                self.root = None
-            elif node is parent.left:
-                parent.left = None
-            elif node is parent.right:
-                parent.right = None
-            return node
-        # if node has one child, replace the node with it's child
-        elif (node.left is None) ^ (node.right is None):
-            if parent is None:
-                if node.left is not None:
-                    self.root = node.left
-                else:
-                    self.root = node.right
-                node.parent_ref = None
-            elif node is parent.left:
-                if node.left is not None:
-                    parent.left = node.left
-                    node.left.parent_ref = OrderedTreeDict._make_ref(parent)
-                else:
-                    parent.left = node.right
-                    node.right.parent_ref = OrderedTreeDict._make_ref(parent)
-            else: # node is parent.right
-                if node.left is node:
-                    parent.right = node.left
-                    node.left.parent_ref = OrderedTreeDict._make_ref(parent)
-                else:
-                    parent.right = node.right
-                    node.right.parent_ref = OrderedTreeDict._make_ref(parent)
-            self._deletion_maintain(node)
-            return node
-        # if node has two children, find it's successor and delete it recursively, copying it's key/value to this node.
-        # if the node has a right child, it's inorder successor is the minimum of the right children.
-        else:
-            successor = OrderedTreeDict._successor(node)
-            node.key, node.value = successor.key, successor.value
-            self._delete(successor)
-            return node
-
-    def delete(SplayDict self, object key):
-        cdef splaynode_t *node = self._get_node(key)
-        self._delete(node)
-
-    cpdef update(SplayDict self, object items):
-        cdef object key, value
-        for key, value in items:
-            self._insert(key, value)
+#    def delete(SplayDict self, object key):
+#        cdef splaynode_t *node = self._get_node(key)
+#        self._delete(node)
+#
+#    cpdef update(SplayDict self, object items):
+#        cdef object key, value
+#        for key, value in items:
+#            self._insert(key, value)
+#
+#    def ordered_iter(SplayDict self):
+#        cdef splaynode_t *node = self._minimum(self.root)
+#        while node is not NULL:
+#            yield node
+#            node = SplayDict._successor(node)
 
 #    def copy(OrderedTreeDict self):
 #        """ Shallow copy. """
