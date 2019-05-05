@@ -27,7 +27,7 @@ cdef class SplayNodeManager:
         size_t storage_length
         splaynode_t *storage
         size_t min_size
-        
+
     def __cinit__(SplayNodeManager self, size_t size=64):
         self.storage_length = 0
         self.nodes_occupied = 0
@@ -94,7 +94,6 @@ cdef class SplayNodeManager:
         # Reduce mem size if only half full
         if (self.nodes_occupied < self.storage_length // 2) and (self.storage_length // 2 > self.min_size):
             self._realloc_storage(self.storage_length // 2)
-                
 
 @cython.final
 cdef class SplayDict:
@@ -116,7 +115,7 @@ cdef class SplayDict:
             self.update(iterable)
         else:
             self.storage = SplayNodeManager()
-    
+
     @cython.nonecheck(False)
     cdef inline _rotate_right(SplayDict self, splaynode_t *t):
         if t is NULL:
@@ -164,6 +163,7 @@ cdef class SplayDict:
                 if parent is grandparent[0].left and node is parent[0].left:
                     self._rotate_right(parent)
                     self._rotate_right(grandparent)
+                # zag zag
                 elif parent is grandparent[0].right and node is parent[0].right:
                     self._rotate_left(parent)
                     self._rotate_left(grandparent)
@@ -171,6 +171,7 @@ cdef class SplayDict:
                 elif parent is grandparent[0].left and node is parent[0].right:
                     self._rotate_left(parent)
                     self._rotate_right(grandparent)
+                # zag zig
                 elif parent is grandparent[0].right and node is parent[0].left:
                     self._rotate_right(parent)
                     self._rotate_left(grandparent)
@@ -180,8 +181,7 @@ cdef class SplayDict:
                 else: # node is parent[0].right
                     self._rotate_left(parent)
         return
-            
-    
+
     @cython.nonecheck(False)
     cdef inline _rotate_left(SplayDict self, splaynode_t *t):
         if t is NULL:
@@ -213,11 +213,39 @@ cdef class SplayDict:
             else:
                 assert False, "Node is not child of parent"
 
-    def insert(SplayDict self, object key, object value):
+    @staticmethod
+    cdef inline splaynode_t* _minimum(splaynode_t *node):
+        if node is None:
+            raise KeyError("Dictionary is empty.")
+        cdef splaynode_t *curr_node = None
+        cdef splaynode_t *next_node = node
+        while next_node is not None:
+            curr_node = next_node
+            next_node = next_node[0].left
+        return curr_node
+
+    def _get_node(SplayDict self, object key):
+        cdef splaynode_t *current_node = NULL;
+        cdef splaynode_t *next_node = self.root;
+
+        while next_node = NULL:
+            current_node = next_node
+            self._splay_step(current_node)
+            if(current_node[0].value < value):
+                next_node = current_node[0].left
+            elif (current_node[0].right):
+                next_node = current_node[0].right
+            else:
+                self._splay(current_node)
+                break
+
+        return next_node
+
+    cpdef inline _insert(SplayDict self, object key, object value):
         cdef splaynode_t *new_node = NULL
         cdef splaynode_t *insertion_node = NULL
         cdef splaynode_t *next_node = self.root
-        
+
         if self.root is NULL:
             self.root = self.storage.alloc_node()
             Py_INCREF(key)
@@ -225,168 +253,118 @@ cdef class SplayDict:
             self.root[0].key = <PyObject *> key
             self.root[0].value = <PyObject *> value
             return
-        
+
         while next_node is not NULL:
             insertion_node = next_node
+            self._splay_step(insertion_node)
             if key < (<object> insertion_node[0].key):
                 next_node = insertion_node[0].left
             elif key > (<object> insertion_node[0].key):
                 next_node = insertion_node[0].right
-            else: # key == insertion node key
+            else: # key == insertion node key, insertion_node == next_node
                 break
-                
-        # splay
-        
+
         if next_node is not NULL:
             # key == insertion node key
             # insert into existing node
             Py_DECREF(<object> next_node[0].value)
             Py_INCREF(value)
             next_node[0].value = <PyObject *>value
-        
-        
+            self._splay(next_node)
+            return
+
+        new_node = self.storage.alloc_node()
+        Py_INCREF(key)
+        Py_INCREF(value)
+        new_node[0].key = key
+        new_node[0].value = value
+        new_node[0].parent = insertion_node
+
+        if(insertion_node[0].key < key):
+            insertion_node[0].left = new_node
+        else:
+            insertion_node[0].right = new_node
+        self._splay(new_node)
+        return
 
     def clear(SplayDict self):
         self.storage = SplayNodeManager()
         self.root = NULL
-        
-#    @cython.nonecheck(False)
-#    cdef inline _insert(OrderedTreeDict self, object key, object value, bint replace=True):
-#        cdef _SBTDictNode insertion_node, next_node, new_node, parent_node, prev_parent_node
-#        cdef size_t left_size, right_size
-#        # Find insertion point
-#        insertion_node = None
-#        next_node = self.root
-#        while next_node is not None:
-#            insertion_node = next_node
-#            if key < insertion_node.key:
-#                next_node = insertion_node.left
-#            elif key > insertion_node.key:
-#                next_node = insertion_node.right
-#            else: # key == insertion_node.key
-#                break
-#        # Handle existing node if present.
-#        if next_node is not None:
-#            assert next_node.key == key
-#            if replace:
-#                # Replace value of existing node
-#                next_node.value = value
-#                return
-#            else:
-#                # No-op
-#                return
-#
-#        # Create new node
-#        new_node = _SBTDictNode()
-#        new_node.key = key
-#        new_node.value = value
-#        new_node.size = 1
-#        new_node.left = None
-#        new_node.right = None
-#        
-#        # Insert at the correct place in the tree
-#        if insertion_node is None:
-#            # No other nodes in tree
-#            self.root = new_node
-#            new_node.parent_ref = None
-#            return
-#        else:
-#            # Compare key to find whether it should be a left or right child
-#            new_node.parent_ref = OrderedTreeDict._make_ref(insertion_node)
-#            if key < insertion_node.key:
-#                # insert left
-#                insertion_node.left = new_node
-#            else:
-#                # insert right
-#                insertion_node.right = new_node
-#        
-#        parent_node = insertion_node
-#        parent_node.size += 1
-#        while parent_node is not None:
-#            left_size = OrderedTreeDict._node_left_size(parent_node)
-#            right_size = OrderedTreeDict._node_right_size(parent_node)
-#            parent_node.size = left_size + right_size + 1
-#            self._maintain(parent_node)
-#            parent_node = OrderedTreeDict._get_parent(parent_node)
-#    
-#    cpdef put(OrderedTreeDict self, object key, object value):
-#        self._insert(key, value)
-#
-#    cdef inline _deletion_maintain(OrderedTreeDict self,_SBTDictNode node):
-#        node = OrderedTreeDict._get_parent(node)
-#        while node is not None:
-#            node.size -= 1
-#            self._maintain(node)
-#            node = OrderedTreeDict._get_parent(node)
-#
-#    @cython.nonecheck(False)
-#    cdef inline _delete(OrderedTreeDict self, _SBTDictNode node):
-#        if node is None:
-#            return None
-#        
-#        cdef _SBTDictNode successor
-#        cdef _SBTDictNode parent = OrderedTreeDict._get_parent(node)
-#        
-#        # If node is leaf, delete node.
-#        if (node.left is None) and (node.right is None):
-#            if parent is None:
-#                self.root = None
-#            elif node is parent.left:
-#                parent.left = None
-#            elif node is parent.right:
-#                parent.right = None
-#            self._deletion_maintain(node)
-#            return node
-#        # if node has one child, replace the node with it's child
-#        elif (node.left is None) ^ (node.right is None):
-#            if parent is None:
-#                if node.left is not None:
-#                    self.root = node.left
-#                else:
-#                    self.root = node.right
-#                node.parent_ref = None
-#            elif node is parent.left:
-#                if node.left is not None:
-#                    parent.left = node.left
-#                    node.left.parent_ref = OrderedTreeDict._make_ref(parent)
-#                else:
-#                    parent.left = node.right
-#                    node.right.parent_ref = OrderedTreeDict._make_ref(parent)
-#            else: # node is parent.right
-#                if node.left is node:
-#                    parent.right = node.left
-#                    node.left.parent_ref = OrderedTreeDict._make_ref(parent)
-#                else:
-#                    parent.right = node.right
-#                    node.right.parent_ref = OrderedTreeDict._make_ref(parent)
-#            self._deletion_maintain(node)
-#            return node
-#        # if node has two children, find it's successor and delete it recursively, copying it's key/value to this node.
-#        # if the node has a right child, it's inorder successor is the minimum of the right children.
-#        else:
-#            # need to implement _successor
-#            successor = OrderedTreeDict._successor(node)
-#            node.key, node.value = successor.key, successor.value
-#            self._delete(successor)
-#            return node
-#        
-#    def delete(OrderedTreeDict self, object key):
-#        cdef _SBTDictNode node = self._get_node(key)
-#        self._delete(node)
-#
-#    cpdef update(OrderedTreeDict self, object items):
-#        cdef object key, value
-#        for key, value in items:
-#            self._insert(key, value)
-#            
-#    def clear(OrderedTreeDict self):
-#        """ Removes all entries from the dictionary. """
-#        self.root = None
-#    
+
+    cpdef put(OrderedTreeDict self, object key, object value):
+        self._insert(key, value)
+
+    cdef inline _successor(splaynode_t *node):
+        cdef _SBTDictNode parent = node[0].parent
+        if node[0].right is not NULL:
+            return OrderedTreeDict._minimum(node.right)
+        while (parent is not NULL) and (node is parent[0].right):
+            node = parent
+            parent = node[0].parent
+        return parent
+
+    @cython.nonecheck(False)
+    cdef inline _delete(SplayDict self, splaydictnode_t *node):
+        if node is NULL:
+            return None
+
+        cdef splaynode_t *successor
+        cdef splaynode_t *parent = node[0].parent
+
+        # If node is leaf, delete node.
+        if (node.left is None) and (node.right is None):
+            if parent is None:
+                self.root = None
+            elif node is parent.left:
+                parent.left = None
+            elif node is parent.right:
+                parent.right = None
+            return node
+        # if node has one child, replace the node with it's child
+        elif (node.left is None) ^ (node.right is None):
+            if parent is None:
+                if node.left is not None:
+                    self.root = node.left
+                else:
+                    self.root = node.right
+                node.parent_ref = None
+            elif node is parent.left:
+                if node.left is not None:
+                    parent.left = node.left
+                    node.left.parent_ref = OrderedTreeDict._make_ref(parent)
+                else:
+                    parent.left = node.right
+                    node.right.parent_ref = OrderedTreeDict._make_ref(parent)
+            else: # node is parent.right
+                if node.left is node:
+                    parent.right = node.left
+                    node.left.parent_ref = OrderedTreeDict._make_ref(parent)
+                else:
+                    parent.right = node.right
+                    node.right.parent_ref = OrderedTreeDict._make_ref(parent)
+            self._deletion_maintain(node)
+            return node
+        # if node has two children, find it's successor and delete it recursively, copying it's key/value to this node.
+        # if the node has a right child, it's inorder successor is the minimum of the right children.
+        else:
+            successor = OrderedTreeDict._successor(node)
+            node.key, node.value = successor.key, successor.value
+            self._delete(successor)
+            return node
+
+    def delete(SplayDict self, object key):
+        cdef splaynode_t *node = self._get_node(key)
+        self._delete(node)
+
+    cpdef update(SplayDict self, object items):
+        cdef object key, value
+        for key, value in items:
+            self._insert(key, value)
+
 #    def copy(OrderedTreeDict self):
 #        """ Shallow copy. """
-#        return OrderedTreeDict(self)
-#
+#        return OrderedTreeDic
+
 #    @staticmethod
 #    def fromkeys(object keys, object value=None) -> OrderedTreeDict:
 #        """The fromkeys() method creates a new dictionary from the given sequence of elements with a value provided by the user. """
@@ -467,43 +445,6 @@ cdef class SplayDict:
 #        cdef _SBTDictNode min_node = OrderedTreeDict._minimum(self.root)
 #        return min_node.key, min_node.value
 #    
-#    def select(OrderedTreeDict self, size_t i):
-#        cdef _SBTDictNode node = self.root
-#        if node is None:
-#            raise IndexError()
-#        cdef size_t r = OrderedTreeDict._node_left_size(node)
-#        while i != r and node is not None:
-#            if i < r:
-#                node = node.left
-#            else:
-#                node = node.right
-#                i = i - (r + 1)
-#            r = OrderedTreeDict._node_left_size(node)
-#        if node is None:
-#            raise IndexError("No such rank.")
-#        return node.key, node.value
-#    
-#    def rank(OrderedTreeDict self, object key):
-#        cdef _SBTDictNode node = self._get_node(key)
-#        cdef size_t rank = OrderedTreeDict._node_left_size(node) + 1
-#        cdef _SBTDictNode parent_node = OrderedTreeDict._get_parent(node)
-#        while parent_node is not None:
-#            if node is parent_node.right:
-#                rank = rank + OrderedTreeDict._node_left_size(parent_node) + 1
-#            node = parent_node
-#            parent_node = OrderedTreeDict._get_parent(parent_node)
-#        return rank - 1
-#    
-#    @staticmethod
-#    @cython.nonecheck(False)
-#    cdef inline _successor(_SBTDictNode node):
-#        cdef _SBTDictNode parent = OrderedTreeDict._get_parent(node)
-#        if node.right is not None:
-#            return OrderedTreeDict._minimum(node.right)
-#        while (parent is not None) and (node is parent.right):
-#            node = parent
-#            parent = OrderedTreeDict._get_parent(parent)
-#        return parent
 #    
 #    def successor(OrderedTreeDict self, object key):
 #        cdef _SBTDictNode node = self._get_node(key)
