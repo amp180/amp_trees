@@ -10,8 +10,6 @@ cdef inline size_t size_t_max(size_t a, size_t b) nogil:
     return a if (a >= b) else b
 
 
-#@cython.trashcan(True)
-@cython.no_gc_clear
 @cython.internal
 @cython.final
 cdef class _SBTDictNode:
@@ -27,7 +25,6 @@ cdef class _SBTDictNode:
     __slots__=None
 
 
-@cython.no_gc_clear
 @cython.final
 cdef class OrderedTreeDict:
     """ A dict based on an ordered statistic SBT tree."""

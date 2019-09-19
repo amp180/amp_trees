@@ -30,9 +30,8 @@ py_ext = '.py' if USING_CYTHON else '.c'
 init = Extension("amp_trees.__init__", ["amp_trees/__init__"+py_ext])
 treedict = Extension("amp_trees.treedict", ["amp_trees/treedict"+cy_ext])
 splaydict = Extension("amp_trees.splaydict", ["amp_trees/splaydict"+cy_ext])
-memstack = Extension("amp_trees.memstack", ["amp_trees/memstack"+cy_ext])
 
-modules = [init, treedict, splaydict, memstack]
+modules = [init, treedict, splaydict]
 
 # generate .c files
 if USING_CYTHON:

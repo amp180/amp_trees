@@ -12,6 +12,7 @@ deps = setuptools
        wheel
        cython
 
-commands = python setup.py build_ext
+commands = python setup.py build_ext --inplace
+           python -m unittest -vvv
            python setup.py bdist_wheel
 """
