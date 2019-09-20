@@ -27,7 +27,11 @@ cdef class _SBTDictNode:
 
 @cython.final
 cdef class OrderedTreeDict:
-    """ A dict based on an ordered statistic SBT tree."""
+    """ A dict based on a size-balanced ordered statistic tree.
+    Supports a select(n) operation to find the nth item in sorted order in log(n) time.
+    Supports a rank(key) operation to find the position of an item in sorted order.
+    Supports iteration in forward and reverse sorted order.
+    """
     cdef _SBTDictNode root
     cdef object __weakref__
 

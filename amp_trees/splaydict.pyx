@@ -6,9 +6,10 @@ cdef size_t SIGNAL_CHECK_INTERVAL = 10000
 
 
 @cython.final
+@cython.internal
 cdef class SplayNode:
-    cdef public SplayNode left, right, parent
-    cdef public object key, value
+    cdef SplayNode left, right, parent
+    cdef object key, value
     cdef object __weakref__
     __slots__=None
 
@@ -26,9 +27,11 @@ cdef class SplayNode:
 @cython.final
 cdef class SplayDict:
     """A dict structured as a splay tree.
+       Not balanced but repeated accesses to a small group of keys will cause them to rotate to the top of the tree.
+       This means that O(height) operations depend on the height of the group of elements you're working on, not necassarily the full height of the tree.
        Requires comparable keys.
-       Supports key lookup, min key and max key in log(n) time.
-
+       Supports key lookup, update, delete, pop, min key and max key in O(h) time.
+       Getting the successor or predecessor of an item for iteration takes O(h) time and O(1) memory.
     """
     cdef public SplayNode root
     cdef public size_t size
@@ -56,12 +59,12 @@ cdef class SplayDict:
         self._insert(key, value)
 
     def items(SplayDict self):
-    """Returns a generator that can be used to iterate over the key value pairs in the splaydict."""
-       cdef SplayNode node
-       node = SplayDict._minimum(self.root)
-       while node is not None:
-           yield (node.key, node.value)
-           node = SplayDict._successor(node)
+        """Returns a generator that can be used to iterate over the key value pairs in the splaydict."""
+        cdef SplayNode node
+        node = SplayDict._minimum(self.root)
+        while node is not None:
+            yield (node.key, node.value)
+            node = SplayDict._successor(node)
            
     def keys(SplayDict self):
         """Returns a generator that can be used to iterate over the keys in the splaydict."""
